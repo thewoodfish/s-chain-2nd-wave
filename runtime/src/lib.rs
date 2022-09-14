@@ -278,6 +278,7 @@ parameter_types! {
 
 impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
+	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
 	type MaxDIDLength =  MaxDIDLength;
 	type MaxSamNameLength = MaxSamNameLength;
 	type MaxDocCIDLength = MaxDocCIDLength;
