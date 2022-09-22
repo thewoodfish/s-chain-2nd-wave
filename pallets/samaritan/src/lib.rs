@@ -359,6 +359,7 @@ pub mod pallet {
 
 			let nlink = Self::extract_root(&link);
 			let mut error = true;	// will be true if only we add the access
+			let mut i = 0;
 
 			let dc: BoundedVec<_, T::MaxDocCIDLength> =
 				cid.clone().try_into().map_err(|()| Error::<T>::DocumentCIDOverflow)?;
@@ -366,15 +367,17 @@ pub mod pallet {
 			let did: BoundedVec<_, T::MaxDIDLength> =
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
-
+			let url: BoundedVec<_, T::MaxWebSiteURL> =
+				link.clone().try_into().map_err(|()| Error::<T>::WebSiteURLOverflow)?;
+			
 			// first make sure a website with the root has been registered
 			match WebSiteRegistry::<T>::get(&did) {
 				Some(sites) => {
-					for w in &sites {
+					for mut w in sites {
 						if Self::vec_to_str(&w.url.encode()).contains(Self::vec_to_str(&nlink).as_str()) {	// select website
 							// add access
 							let access = WebPageAccessList {
-								url: w.url.clone(),
+								url,
 								cid: dc,
 								details_count
 							};
@@ -406,6 +409,19 @@ pub mod pallet {
 							}
 
 							break;
+						}
+
+						i += 1;	// increase index
+					}
+
+					// now update the website 
+					if let Some(sites) = WebSiteRegistry::<T>::get(&did) {
+						if let Some(mut web) = sites.get(i).take() {
+							
+							// update access count
+							web.access_count += 1;
+
+							WebSiteRegistry::<T>::insert(&did, sites);
 						}
 					}
 
