@@ -2,14 +2,15 @@
 
 pub use pallet::*;
 
-#[cfg(test)]
-mod mock;
-
-#[cfg(test)]
-mod tests;
-
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
+
+use frame_support::BoundedVec;
+
+use scale_info::prelude::vec::Vec;
+use scale_info::prelude::string::String;
+use scale_info::prelude::format;
+
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -23,7 +24,6 @@ pub mod pallet {
 
 	use scale_info::prelude::vec::Vec;
 	use scale_info::prelude::string::String;
-	use scale_info::prelude::format;
 
 	use frame_support::traits::{ UnixTime };
 
@@ -36,6 +36,16 @@ pub mod pallet {
 		pub account_id: T::AccountId
 	}
 
+	// important structs
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+	#[scale_info(skip_type_params(T))]
+	#[codec(mel_bound())]
+	pub struct WebSite<T: Config> {
+		pub url: BoundedVec<u8, T::MaxWebSiteURL>,
+		pub cid: BoundedVec<u8, T::MaxDocCIDLength>,
+		pub access_count: u64
+	}
+
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
@@ -44,6 +54,15 @@ pub mod pallet {
 		pub created: u64,
 		pub read_count: u64,
 		pub active: bool
+	}
+
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+	#[scale_info(skip_type_params(T))]
+	#[codec(mel_bound())]
+	pub struct WebPageAccessList<T: Config> {
+		pub url: BoundedVec<u8, T::MaxWebSiteURL>,
+		pub cid: BoundedVec<u8, T::MaxDocCIDLength>,
+		pub details_count: u32
 	}
 
 	#[pallet::config]
@@ -63,6 +82,15 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxNames: Get<u128>;
 
+		#[pallet::constant]
+		type MaxWebSiteURL: Get<u32>;
+
+		#[pallet::constant]
+		type MaxWebSiteCount: Get<u32>;
+
+		#[pallet::constant]
+		type MaxSiteAccessCount: Get<u32>;
+		
 	}
 
 	#[pallet::pallet]
@@ -81,6 +109,15 @@ pub mod pallet {
 	#[pallet::getter(fn doc_metareg)]
 	pub(super) type DocMetaRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxSamNameLength>, DocMetadata<T>>;
 
+	#[pallet::storage]
+	#[pallet::getter(fn website_list)]
+	pub(super) type WebSiteRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<WebSite<T>, T::MaxWebSiteCount>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn sa_list)]
+	pub(super) type SiteAccessList<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxWebSiteURL>, BoundedVec<WebPageAccessList<T>, T::MaxSiteAccessCount>>;
+
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -93,7 +130,11 @@ pub mod pallet {
 		/// retrieve document CID
 		GetDocumentCID(Vec<u8>, Vec<u8>, Vec<u8>),
 		/// activate or deactivate Samaritan
-		ChangeSamaritanVisibilty(Vec<u8>, Vec<u8>)
+		ChangeSamaritanVisibilty(Vec<u8>, Vec<u8>),
+		/// website registered
+		SiteAddedToNetwork(Vec<u8>, Vec<u8>),
+		/// access list updated
+		SiteAccessListUpdated(Vec<u8>, u32),
 	}
 
 	// Errors inform users that something went wrong.
@@ -106,7 +147,15 @@ pub mod pallet {
 		/// DID length overflow
 		DIDLengthOverflow,
 		/// DID Doceument CID overflow
-		DocumentCIDOverflow
+		DocumentCIDOverflow,
+		/// WebSite URL length overflow
+		WebSiteURLOverflow,
+		/// Website Count Overflow
+		WebSiteCountOverflow,
+		/// Website access count overflow
+		SiteAccessCountOverflow,
+		/// access list update failed
+		AccessListUpdateFailed
 	}
 
 	#[pallet::call]
@@ -256,7 +305,132 @@ pub mod pallet {
 			Ok(())
 		}
 
+		#[pallet::weight(0)]
+		/// add webpage access to network
+		pub fn add_website(origin: OriginFor<T>, link: Vec<u8>, cid: Vec<u8>, did_str: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let url: BoundedVec<_, T::MaxWebSiteURL> =
+				link.clone().try_into().map_err(|()| Error::<T>::WebSiteURLOverflow)?;
+
+			let dc: BoundedVec<_, T::MaxDocCIDLength> =
+				cid.clone().try_into().map_err(|()| Error::<T>::DocumentCIDOverflow)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> =
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+
+			let ws: WebSite<T> = WebSite {
+				url,
+				cid: dc,
+				access_count: 0
+			};
+
+			// check first for any record
+			match WebSiteRegistry::<T>::get(&did) {
+				Some(mut sites) => {
+					// add website to registry
+					sites.try_push(ws).map_err(|()| Error::<T>::WebSiteCountOverflow)?;
+
+					// insert into storage
+					WebSiteRegistry::<T>::insert(&did, sites); 
+				},
+				None => {
+					// add website to Vec first
+					let mut sites: BoundedVec<WebSite<T>, T::MaxWebSiteCount> = Default::default();
+
+					sites.try_push(ws).map_err(|()| Error::<T>::WebSiteCountOverflow)?;
+
+					// insert into storage
+					WebSiteRegistry::<T>::insert(&did, sites); 	
+				}
+			}
+
+			// emit event
+			Self::deposit_event(Event::SiteAddedToNetwork(did_str, link));
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// add website to the network
+		pub fn add_web_access(origin: OriginFor<T>, link: Vec<u8>, cid: Vec<u8>, did_str: Vec<u8>, details_count: u32) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let nlink = Self::extract_root(&link);
+			let mut error = true;	// will be true if only we add the access
+
+			let dc: BoundedVec<_, T::MaxDocCIDLength> =
+				cid.clone().try_into().map_err(|()| Error::<T>::DocumentCIDOverflow)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> =
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+
+			// first make sure a website with the root has been registered
+			match WebSiteRegistry::<T>::get(&did) {
+				Some(sites) => {
+					for w in &sites {
+						if Self::vec_to_str(&w.url.encode()).contains(Self::vec_to_str(&nlink).as_str()) {	// select website
+							// add access
+							let access = WebPageAccessList {
+								url: w.url.clone(),
+								cid: dc,
+								details_count
+							};
+
+							// now use the URl to index storage
+							match SiteAccessList::<T>::get(&w.url) {
+								Some(mut list) => {
+									// update access list
+									list.try_push(access).map_err(|()| Error::<T>::SiteAccessCountOverflow)?;
+		
+									// insert into storage
+									SiteAccessList::<T>::insert(&w.url, list); 
+									
+									// completed!
+									error = false;
+								},
+								None => {
+									// create record
+									let mut acs: BoundedVec<WebPageAccessList<T>, T::MaxSiteAccessCount> = Default::default();
+
+									acs.try_push(access).map_err(|()| Error::<T>::SiteAccessCountOverflow)?;
+										
+									// insert into storage
+									SiteAccessList::<T>::insert(&w.url, acs); 	
+
+									// completed!
+									error = false;
+								}
+							}
+
+							break;
+						}
+					}
+
+				},
+				None => {
+					// do nothing
+				}
+			}
+
+			if error {
+				// throw error
+				return Err(Error::<T>::AccessListUpdateFailed.into());
+			} else {
+				// emit event
+				Self::deposit_event(Event::SiteAccessListUpdated(link, details_count));
+			}
+
+			Ok(())
+		}
+
 	}
+
+	}
+
+	
 
 	/// helper functions
 	impl<T: Config> Pallet<T> {
@@ -265,7 +439,7 @@ pub mod pallet {
 		pub fn create_did(
 			vect: Vec<u8>
 		) -> Result<BoundedVec<u8, T::MaxDIDLength>, Error<T>> {
-			let did_str = format!("did:sam:root:{}", Self::vec_to_str(vect));
+			let did_str = format!("did:sam:root:{}", Self::vec_to_str(&vect));
 			let did_vec = Self::str_to_vec(did_str);
 
 			// to bounded vec
@@ -277,9 +451,9 @@ pub mod pallet {
 
 		/// convert account id to string
 		pub fn vec_to_str(
-			vector: Vec<u8>
+			vector: &Vec<u8>
 		) -> String {
-			match String::from_utf8(vector) {
+			match String::from_utf8(vector.clone()) {
 				Ok(s) => s,
 				Err(_e) => String::from("00000000000000000000000000000000000000"),
 			}
@@ -299,6 +473,38 @@ pub mod pallet {
 			}
 		}
 
+		/// extract website root from URL
+		pub fn extract_root(
+			link: &Vec<u8>
+		) -> Vec<u8> {
+		
+			let mut nlink = Vec::new();
+			let mut n: usize = 0;
+			let mut fs = 0;
+		
+			for s in link {
+				if *s == b':' {
+					for i in &link[n..] {
+						if *i != b'/' {
+							if *i != b':' {
+								nlink.push(*i);
+							}
+						} else {
+							if fs == 2 {
+								break;
+							}
+		
+							fs += 1;
+						}
+					}
+		
+					break;
+				}
+				n += 1;
+			}
+			nlink
+		}
+
 		/// convert a string to a vector
 		pub fn str_to_vec(
 			val: String
@@ -309,4 +515,4 @@ pub mod pallet {
 			bytes
 		}
 	}
-}
+

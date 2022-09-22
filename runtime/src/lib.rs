@@ -274,6 +274,9 @@ parameter_types! {
 	pub const MaxSamNameLength: u32 = 128;
 	pub const MaxDocCIDLength: u32 = 48;
 	pub const MaxNames: u128 = 100000000;
+	pub const MaxWebSiteURL: u32 = 100;
+	pub const MaxWebSiteCount: u32 = 1000;
+	pub const MaxSiteAccessCount: u32 = 10000;
 }
 
 impl pallet_samaritan::Config for Runtime {
@@ -283,6 +286,9 @@ impl pallet_samaritan::Config for Runtime {
 	type MaxSamNameLength = MaxSamNameLength;
 	type MaxDocCIDLength = MaxDocCIDLength;
 	type MaxNames = MaxNames;
+	type MaxWebSiteURL = MaxWebSiteURL;
+	type MaxWebSiteCount = MaxWebSiteCount;
+	type MaxSiteAccessCount = MaxSiteAccessCount;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
