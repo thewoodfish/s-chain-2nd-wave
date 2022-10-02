@@ -32,7 +32,6 @@ pub mod pallet {
 	pub struct Samaritan<T: Config> {
 		pub did: BoundedVec<u8, T::MaxDIDLength>,
 		pub account_id: T::AccountId,
-		pub vc_nonce: u64
     }
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -41,6 +40,17 @@ pub mod pallet {
 	pub struct DocMetadata<T: Config> {
 		cid: BoundedVec<u8, T::MaxCIDLength>,
 		created: u64
+	}
+
+
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+	#[scale_info(skip_type_params(T))]
+	#[codec(mel_bound())]
+	pub struct VCredential<T: Config> {
+		cid: BoundedVec<u8, T::MaxCIDLength>,
+		subject: BoundedVec<u8, T::MaxDIDLength>,
+		created: u64,
+		public: bool
 	}
 
 	#[pallet::config]
@@ -75,6 +85,11 @@ pub mod pallet {
 	#[pallet::getter(fn doc_metareg)]
 	pub(super) type DocMetaRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, DocMetadata<T>>;
 
+	#[pallet::storage]
+	#[pallet::getter(fn doc_vcreg)]
+	pub(super) type VCRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, VCredential<T>>;
+
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -87,7 +102,9 @@ pub mod pallet {
 		/// retrieve DID of a Samaritan
 		ConvertNameToDID(Vec<u8>, Vec<u8>),
 		/// get the nonce for constructing a credential
-		RetreiveVCredentialNonce(Vec<u8>, u64)
+		RetreiveVCredentialNonce(u64),
+		/// a verifiable credential has been created
+		VCredentialCreated(Vec<u8>, Vec<u8>, Vec<u8>)
 	}
 
 	// Errors inform users that something went wrong.
@@ -142,8 +159,7 @@ pub mod pallet {
 			
 			let sam: Samaritan<T> = Samaritan {
 				did: did.clone(),
-				account_id: who,
-				vc_nonce: 0
+				account_id: who
 			};
 
 			// register DID with its name
@@ -209,29 +225,45 @@ pub mod pallet {
 
 		#[pallet::weight(0)]
 		/// retrieve the nonce for constructing a verifiable credential for a Samaritan
-		pub fn get_vc_nonce(origin: OriginFor<T>, did_str: Vec<u8>) -> DispatchResult {
+		pub fn get_vc_nonce(origin: OriginFor<T>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let count = VCRegistry::<T>::iter_keys().count() as u64;
+
+			Self::deposit_event(Event::RetreiveVCredentialNonce(count));
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// record the creation of a verifiable credential onchain
+		pub fn record_credential(origin: OriginFor<T>, did_str: Vec<u8>, sbjct: Vec<u8>, cid_str: Vec<u8>, public: bool) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 			
-			// get the Samaritans name
-			let sam_name = Self::get_sam_name(&did).0;
+			let subject: BoundedVec<_, T::MaxDIDLength> = 
+				sbjct.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
-			let sn: BoundedVec<_, T::MaxSamNameLength> =
-				sam_name.clone().try_into().map_err(|()| Error::<T>::SamaritanNameOverflow)?;
+			let cid: BoundedVec<_, T::MaxCIDLength> =
+				cid_str.clone().try_into().map_err(|()| Error::<T>::IpfsCIDOverflow)?;
 
-			let mut nonce = 0;
+			// create record
+			let cred = VCredential {
+				cid: cid.clone(),
+				subject: subject.clone(),
+				created: T::TimeProvider::now().as_secs(),
+				public
+			};
 
-			// get Samaritan
-			if let Some(sam) = SamaritanPool::<T>::get(&sn) {
-				nonce = sam.vc_nonce;
-			}
+			VCRegistry::<T>::insert(&did, cred);
 
-			Self::deposit_event(Event::RetreiveVCredentialNonce(did.to_vec(), nonce));
+			Self::deposit_event(Event::VCredentialCreated(did.to_vec(), subject.to_vec(), cid.to_vec()));
 
 			Ok(())
 		}
+
 	}
 }
 	
