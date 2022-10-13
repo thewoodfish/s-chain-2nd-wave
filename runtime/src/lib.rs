@@ -271,20 +271,20 @@ impl pallet_template::Config for Runtime {
 
 parameter_types! {
 	pub const MaxDIDLength: u32 = 128;
-	pub const MaxSamNameLength: u32 = 128;
-	pub const MaxCIDLength: u32 = 48;
-	pub const MaxVCLength: u32 = 100000;
-	pub const MaxAssertions: u32 = 100000;
+	pub const MaxNameLength: u32 = 128;
+	pub const MaxHashLength: u32 = 6000;
+	pub const MaxCIDLength: u32 = 128;
+	pub const MaxCacheLength: u32 = 128;
 }
 
 impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
 	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
 	type MaxDIDLength =  MaxDIDLength;
-	type MaxSamNameLength = MaxSamNameLength;
-	type MaxCIDLength = MaxCIDLength;
-	type MaxVCLength = MaxVCLength;
-	type MaxAssertions = MaxAssertions;
+	type MaxNameLength = MaxNameLength;
+	type MaxHashLength =  MaxHashLength;
+	type MaxCIDLength =  MaxCIDLength;
+	type MaxCacheLength =  MaxCacheLength;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
