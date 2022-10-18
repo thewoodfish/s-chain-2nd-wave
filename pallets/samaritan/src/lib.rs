@@ -106,7 +106,9 @@ pub mod pallet {
 		/// changed the visibility scope of a Samaritan
 		SamaritanScopeChanged(Vec<u8>, bool),
 		/// quorum updated
-		TrustQuorumUpdated(Vec<u8>, Vec<u8>)
+		TrustQuorumUpdated(Vec<u8>, Vec<u8>),
+		/// get members of a quorum
+		RetrieveQuorumMembers(Vec<u8>, Vec<Vec<u8>>)
 	}
 
 	// Errors inform users that something went wrong.
@@ -343,6 +345,36 @@ pub mod pallet {
 
 			// emit event
 			Self::deposit_event(Event::TrustQuorumUpdated(did_str, trust_did));
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)] 
+		///list members of a Samaritans trust quorum
+		pub fn enum_quorum(origin: OriginFor<T>, did_str: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let mut list: Vec<Vec<u8>> = Vec::new();
+
+
+			if let Some(quorum) = TrustQuorum::<T>::get(&did) {
+				// loop through to get them
+				for d in quorum {
+					list.push(d.clone().to_vec());
+
+					// select name of Samaritan
+					if let Some(sam) = SamaritanPool::<T>::get(&d) {
+						list.push(sam.name.to_vec());
+					}
+				}
+			}
+
+
+			// emit event
+			Self::deposit_event(Event::RetrieveQuorumMembers(did_str, list));
 
 			Ok(())
 		}
