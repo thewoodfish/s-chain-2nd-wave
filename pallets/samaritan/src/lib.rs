@@ -21,7 +21,6 @@ pub mod pallet {
 	use frame_support::{pallet_prelude::{*, DispatchResult}, BoundedVec};
 	use frame_system::pallet_prelude::*;
 
-
 	use scale_info::prelude::vec::Vec;
 	// use scale_info::prelude::string::String;
 
@@ -108,7 +107,9 @@ pub mod pallet {
 		/// quorum updated
 		TrustQuorumUpdated(Vec<u8>, Vec<u8>),
 		/// get members of a quorum
-		RetrieveQuorumMembers(Vec<u8>, Vec<Vec<u8>>)
+		RetrieveQuorumMembers(Vec<u8>, Vec<Vec<u8>>),
+		/// changed a samaritans auth signature
+		AuthSigModified(Vec<u8>, Vec<u8>)
 	}
 
 	// Errors inform users that something went wrong.
@@ -184,7 +185,7 @@ pub mod pallet {
 				hl.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 
 			// create metadata
-			let doc: DocMetadata<T> = DocMetadata {
+			let ndoc: DocMetadata<T> = DocMetadata {
 				version: 1,
 				hl: hash,
 				cid: dc,
@@ -192,12 +193,40 @@ pub mod pallet {
 				active: true
 			};
 
-			let mut cache: BoundedVec<DocMetadata<T>, T::MaxCacheLength> = Default::default();
+			// select the latest DID document 
+			match DocMetaRegistry::<T>::get(&did) {
+				Some(doc) => {
+					let mut index = 0;
+					for mut _d in &doc {
+						index += 1;
+					}
 
-			cache.try_push(doc).map_err(|()| Error::<T>::CacheOverflow)?;
+					// disable the current active DID doc, there can be only one
+					let mut d_vec = doc.into_inner();
+					d_vec[index - 1].active = false;
 
-			// insert into storage 
-			DocMetaRegistry::<T>::insert(&did, cache);
+					let mut meta: BoundedVec<DocMetadata<T>, T::MaxCacheLength> = Default::default();
+
+					for i in d_vec {
+						meta.try_push(i).map_err(|()| Error::<T>::CacheOverflow)?;
+					}
+
+					// insert the new doc
+					meta.try_push(ndoc).map_err(|()| Error::<T>::CacheOverflow)?;
+
+					// save to storage
+					DocMetaRegistry::<T>::insert(&did, meta);
+				},
+
+				None => {
+					let mut cache: BoundedVec<DocMetadata<T>, T::MaxCacheLength> = Default::default();
+
+					cache.try_push(ndoc).map_err(|()| Error::<T>::CacheOverflow)?;
+
+					// insert into storage 
+					DocMetaRegistry::<T>::insert(&did, cache);
+				}
+			}
 
 			// emit event
 			Self::deposit_event(Event::DIDDocumentCreated(did.to_vec(), doc_cid));
@@ -350,7 +379,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)] 
-		///list members of a Samaritans trust quorum
+		/// list members of a Samaritans trust quorum
 		pub fn enum_quorum(origin: OriginFor<T>, did_str: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
@@ -375,6 +404,26 @@ pub mod pallet {
 
 			// emit event
 			Self::deposit_event(Event::RetrieveQuorumMembers(did_str, list));
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)] 
+		/// change the auth sig of a samaritan
+		pub fn change_sig(origin: OriginFor<T>, hk: Vec<u8>, hash_key: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let hash: BoundedVec<_, T::MaxHashLength> =
+				hk.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			let new_hash: BoundedVec<_, T::MaxHashLength> =
+				hash_key.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			// swap signature
+			AuthSigs::<T>::swap(hash, new_hash);
+
+			// emit event
+			Self::deposit_event(Event::AuthSigModified(hk, hash_key));
 
 			Ok(())
 		}
