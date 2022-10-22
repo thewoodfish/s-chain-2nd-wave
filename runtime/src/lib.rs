@@ -281,11 +281,11 @@ parameter_types! {
 impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
 	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
-	type MaxDIDLength =  MaxDIDLength;
+	type MaxDIDLength = MaxDIDLength;
 	type MaxNameLength = MaxNameLength;
-	type MaxHashLength =  MaxHashLength;
-	type MaxCIDLength =  MaxCIDLength;
-	type MaxCacheLength =  MaxCacheLength;
+	type MaxHashLength = MaxHashLength;
+	type MaxCIDLength = MaxCIDLength;
+	type MaxCacheLength = MaxCacheLength;
 	type MaxQuorumMembersCount = MaxQuorumMembersCount;
 }
 
