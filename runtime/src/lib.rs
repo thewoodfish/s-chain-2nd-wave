@@ -273,7 +273,7 @@ impl pallet_template::Config for Runtime {
 /// provides core functionality for the SamOS.
 impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
-	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
+	type TimeProvider = Timestamp;
 	type MaxDIDLength = ConstU32<128>;
 	type MaxNameLength = ConstU32<128>;
 	type MaxHashLength = ConstU32<6000>; // TODO: refactor this out

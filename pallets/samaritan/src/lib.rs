@@ -2,28 +2,30 @@
 
 pub use pallet::*;
 
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
-
-// use frame_support::BoundedVec;
 
 use scale_info::prelude::vec::Vec;
 use scale_info::prelude::string::String;
 
 #[frame_support::pallet]
 pub mod pallet {
-	// use core::str::FromStr;
- 
-	// use core::ops::Bound;
-	// use parity_scale_codec::alloc::string::ToString;
-	// use scale_info::prelude::format;
 
 	use frame_support::{pallet_prelude::{*, DispatchResult}, BoundedVec};
+	use frame_support::{traits::UnixTime};
 	use frame_system::pallet_prelude::*;
 
 	use scale_info::prelude::vec::Vec;
 
 	// important structs
+
+	// Used to track the name and account of a samaritan
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
@@ -32,6 +34,7 @@ pub mod pallet {
 		pub account_id: T::AccountId
     }
 
+	// Metadata for a document that a samaritan can create
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
@@ -46,23 +49,32 @@ pub mod pallet {
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		
+		// Some way to timestamp document creation 
 		type TimeProvider: UnixTime;
 
+		// DID length must be bounded.
 		#[pallet::constant]
 		type MaxDIDLength: Get<u32>;
 
+		// User name length must be bounded.
 		#[pallet::constant]
 		type MaxNameLength: Get<u32>;
 
+		// Hash length must be bounded.
+		// TODO: we don't need this, we can just ensure the hash is H256 
 		#[pallet::constant]
 		type MaxHashLength: Get<u32>;
 
+		// CID length must be bounded.
 		#[pallet::constant]
 		type MaxCIDLength: Get<u32>;
 
+		// Cache length must be bounded.
 		#[pallet::constant]
 		type MaxCacheLength: Get<u32>;
 
+		// Quorum size must be bounded.
 		#[pallet::constant]
 		type MaxQuorumMembersCount: Get<u32>;
 
@@ -183,7 +195,7 @@ pub mod pallet {
 
 			// create metadata
 			let ndoc: DocMetadata<T> = DocMetadata {
-				version: 1,
+				version: 1, // TODO: this should probably be incremented overtime
 				hl: hash,
 				cid: dc,
 				created: T::TimeProvider::now().as_secs(),
