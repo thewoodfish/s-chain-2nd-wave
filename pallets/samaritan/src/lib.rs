@@ -22,9 +22,6 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 
 	use scale_info::prelude::vec::Vec;
-	// use scale_info::prelude::string::String;
-
-	use frame_support::traits::UnixTime;
 
 	// important structs
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
