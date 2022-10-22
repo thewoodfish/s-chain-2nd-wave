@@ -269,24 +269,17 @@ impl pallet_template::Config for Runtime {
 	type Event = Event;
 }
 
-parameter_types! {
-	pub const MaxDIDLength: u32 = 128;
-	pub const MaxNameLength: u32 = 128;
-	pub const MaxHashLength: u32 = 6000;
-	pub const MaxCIDLength: u32 = 128;
-	pub const MaxCacheLength: u32 = 128;
-	pub const MaxQuorumMembersCount: u32 = 3;
-}
-
+/// The Samaritan pallet manages samaritan DIDs and
+/// provides core functionality for the SamOS.
 impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
 	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
-	type MaxDIDLength = MaxDIDLength;
-	type MaxNameLength = MaxNameLength;
-	type MaxHashLength = MaxHashLength;
-	type MaxCIDLength = MaxCIDLength;
-	type MaxCacheLength = MaxCacheLength;
-	type MaxQuorumMembersCount = MaxQuorumMembersCount;
+	type MaxDIDLength = ConstU32<128>;
+	type MaxNameLength = ConstU32<128>;
+	type MaxHashLength = ConstU32<6000>; // TODO: refactor this out
+	type MaxCIDLength = ConstU32<128>;
+	type MaxCacheLength = ConstU32<128>;
+	type MaxQuorumMembersCount = ConstU32<3>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
