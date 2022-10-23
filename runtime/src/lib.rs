@@ -276,6 +276,9 @@ parameter_types! {
 	pub const MaxCIDLength: u32 = 128;
 	pub const MaxCacheLength: u32 = 128;
 	pub const MaxQuorumMembersCount: u32 = 3;
+	pub const MaxCredentialsCount: u32 = 10000;
+	pub const MaxResourceAddressLength: u32 = 128; 
+	pub const MaxSigListHeight: u32 = 10000;
 }
 
 impl pallet_samaritan::Config for Runtime {
@@ -287,6 +290,9 @@ impl pallet_samaritan::Config for Runtime {
 	type MaxCIDLength =  MaxCIDLength;
 	type MaxCacheLength =  MaxCacheLength;
 	type MaxQuorumMembersCount = MaxQuorumMembersCount;
+	type MaxCredentialsCount = MaxCredentialsCount;
+	type MaxResourceAddressLength = MaxResourceAddressLength;
+	type MaxSigListHeight = MaxSigListHeight;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
