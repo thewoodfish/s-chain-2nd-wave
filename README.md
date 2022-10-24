@@ -1,1 +1,1 @@
-This is the second wave of the Samaritan chain. Still Beta.
+This is the repo for the SamaritanOS blockchain code. For more info see https://github.com/thewoodfish/SamaritanOS
