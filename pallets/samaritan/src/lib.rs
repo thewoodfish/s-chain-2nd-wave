@@ -104,21 +104,21 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// creation of a Samaritan
-		SamaritanCreated(Vec<u8>, Vec<u8>),
+		SamaritanCreated { name: Vec<u8>, did: Vec<u8> },
 		/// creation of DID document
-		DIDDocumentCreated(Vec<u8>, Vec<u8>),
+		DIDDocumentCreated { did: Vec<u8>, cid: Vec<u8> },
 		/// fetch did address
-		DIDAddrFetched(Vec<u8>),
+		DIDAddrFetched { did: Vec<u8> },
 		/// changed the name of a Samaritan
-		SamaritanNameChanged(Vec<u8>, Vec<u8>),
+		SamaritanNameChanged { name: Vec<u8>, did: Vec<u8> },
 		/// changed the visibility scope of a Samaritan
-		SamaritanScopeChanged(Vec<u8>, bool),
+		SamaritanScopeChanged { did: Vec<u8>, state: bool },
 		/// quorum updated
-		TrustQuorumUpdated(Vec<u8>, Vec<u8>),
+		TrustQuorumUpdated { did: Vec<u8>, trust_did: Vec<u8> },
 		/// get members of a quorum
-		RetrieveQuorumMembers(Vec<u8>, Vec<Vec<u8>>),
+		RetrieveQuorumMembers { did: Vec<u8>, names: Vec<Vec<u8>> },
 		/// changed a samaritans auth signature
-		AuthSigModified(Vec<u8>, Vec<u8>)
+		AuthSigModified {hash: Vec<u8>, key: Vec<u8> }
 	}
 
 	// Errors inform users that something went wrong.
@@ -159,6 +159,8 @@ pub mod pallet {
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
+			// TODO: handle whether did already exists?
+			
 			let sig: BoundedVec<_, T::MaxHashLength> = 
 				hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 			
@@ -174,7 +176,7 @@ pub mod pallet {
 			AuthSigs::<T>::insert(&sig, did.clone());
 
 			// emit event
-			Self::deposit_event(Event::SamaritanCreated(sn.to_vec(), did_str));
+			Self::deposit_event(Event::SamaritanCreated { name: sn.to_vec(), did: did_str } );
 
 			Ok(())
 		}
@@ -238,7 +240,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::DIDDocumentCreated(did.to_vec(), doc_cid));
+			Self::deposit_event(Event::DIDDocumentCreated { did: did.to_vec(), cid: doc_cid });
 
 			Ok(())
 		}
@@ -262,7 +264,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::DIDAddrFetched(_did));
+			Self::deposit_event(Event::DIDAddrFetched { did: _did } );
 
 			Ok(())
 		}
@@ -290,7 +292,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::SamaritanNameChanged(sn.to_vec(), did_str));
+			Self::deposit_event(Event::SamaritanNameChanged { name: sn.to_vec(), did: did_str } );
 
 			Ok(())
 		}
@@ -332,7 +334,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::SamaritanScopeChanged(did_str, state));
+			Self::deposit_event(Event::SamaritanScopeChanged { did: did_str, state: state });
 
 			Ok(())
 		}
@@ -382,7 +384,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::TrustQuorumUpdated(did_str, trust_did));
+			Self::deposit_event(Event::TrustQuorumUpdated { did: did_str, trust_did });
 
 			Ok(())
 		}
@@ -412,7 +414,7 @@ pub mod pallet {
 
 
 			// emit event
-			Self::deposit_event(Event::RetrieveQuorumMembers(did_str, list));
+			Self::deposit_event(Event::RetrieveQuorumMembers { did: did_str, names: list });
 
 			Ok(())
 		}
@@ -432,7 +434,7 @@ pub mod pallet {
 			AuthSigs::<T>::swap(hash, new_hash);
 
 			// emit event
-			Self::deposit_event(Event::AuthSigModified(hk, hash_key));
+			Self::deposit_event(Event::AuthSigModified {hash: hk, key: hash_key });
 
 			Ok(())
 		}
