@@ -273,7 +273,7 @@ parameter_types! {
 	pub const MaxDIDLength: u32 = 128;
 	pub const MaxNameLength: u32 = 128;
 	pub const MaxHashLength: u32 = 6000;
-	pub const MaxCIDLength: u32 = 128;
+	pub const MaxURILength: u32 = 128;
 	pub const MaxCacheLength: u32 = 128;
 	pub const MaxQuorumMembersCount: u32 = 3;
 	pub const MaxHoldingsCount: u32 = 10000;
@@ -288,7 +288,7 @@ impl pallet_samaritan::Config for Runtime {
 	type MaxDIDLength =  MaxDIDLength;
 	type MaxNameLength = MaxNameLength;
 	type MaxHashLength =  MaxHashLength;
-	type MaxCIDLength =  MaxCIDLength;
+	type MaxURILength =  MaxURILength;
 	type MaxCacheLength =  MaxCacheLength;
 	type MaxQuorumMembersCount = MaxQuorumMembersCount;
 	type MaxHoldingsCount = MaxHoldingsCount;

@@ -42,7 +42,7 @@ pub mod pallet {
 	pub struct DocMetadata<T: Config> {
 		version: u64,
 		hl: BoundedVec<u8, T::MaxHashLength>,
-		cid: BoundedVec<u8, T::MaxCIDLength>,
+		uri: BoundedVec<u8, T::MaxURILength>,
 		created: u64,
 		active: bool
 	}
@@ -53,7 +53,7 @@ pub mod pallet {
 	pub struct DataFile<T: Config> {
 		name: Option<BoundedVec<u8, T::MaxHashLength>>,
 		desc: Option<BoundedVec<u8, T::MaxHashLength>>,
-		cid: BoundedVec<u8, T::MaxCIDLength>,
+		uri: BoundedVec<u8, T::MaxURILength>,
 		created: u64,
 		public: bool
 	}
@@ -63,7 +63,7 @@ pub mod pallet {
 	// #[codec(mel_bound())]
 	// pub struct VCredential<T: Config> {
 	// 	hl: BoundedVec<u8, T::MaxHashLength>,
-	// 	cid: BoundedVec<u8, T::MaxCIDLength>,
+	// 	uri: BoundedVec<u8, T::MaxURILength>,
 	// 	created: u64,
 	// 	active: bool,
 	// 	desc: BoundedVec<u8, T::MaxHashLength>,
@@ -85,7 +85,7 @@ pub mod pallet {
 		type MaxHashLength: Get<u32>;
 
 		#[pallet::constant]
-		type MaxCIDLength: Get<u32>;
+		type MaxURILength: Get<u32>;
 
 		#[pallet::constant]
 		type MaxCacheLength: Get<u32>;
@@ -172,12 +172,14 @@ pub mod pallet {
 		RetrieveQuorumMembers(Vec<u8>, Vec<Vec<u8>>),
 		/// changed a samaritans auth signature
 		AuthSigModified(Vec<u8>, Vec<u8>),
-		/// fetch important figures for VC construction
+		/// fetch important figures for URL construction
 		FetchDataIndexes(u64, u64, u64, Vec<u8>),
 		/// verifiable credential has been created
 		VCredentialCreated(Vec<u8>, Vec<u8>),
 		/// data has been added to the network
-		DataAddedToNetwork(Vec<u8>, Vec<u8>)
+		DataAddedToNetwork(Vec<u8>, Vec<u8>),
+		/// uri of a resource returned
+		FetchResourceURI(Vec<u8>)
 	}
 
 	// Errors inform users that something went wrong.
@@ -187,8 +189,8 @@ pub mod pallet {
 		NameOverflow,
 		/// DID length overflow
 		DIDLengthOverflow,
-		/// CID overflowed
-		IpfsCIDOverflow,
+		/// URI overflowed
+		IpfsURIOverflow,
 		/// Hash Length overflow
 		HashLengthOverflow,
 		/// Cache Oveflow
@@ -199,6 +201,8 @@ pub mod pallet {
 		SamaritanNotFound,
 		/// DID metadata not found
 		DIDMetaNotFound,
+		/// Resource not found
+		ResourceNotFound,
 		/// Quorum filled up
 		QuorumOverflow,
 		/// Duplicate member
@@ -207,8 +211,10 @@ pub mod pallet {
 		HoldingsListOverflow,
 		/// Maximum signature count on a credential attanined
 		VCSigListOverflow,
-		/// string too long
-		StringLengthOverflow
+		/// String too long
+		StringLengthOverflow,
+		/// Private resource, cannot view
+		ResourceIsPrivate
 	}
 
 	#[pallet::call]
@@ -250,14 +256,14 @@ pub mod pallet {
 
 		#[pallet::weight(0)] 
 		/// DID document has been created on the server, now record it onchain
-		pub fn acknowledge_doc(origin: OriginFor<T>, did_str: Vec<u8>, doc_cid: Vec<u8>, hl: Vec<u8>) -> DispatchResult {
+		pub fn acknowledge_doc(origin: OriginFor<T>, did_str: Vec<u8>, doc_uri: Vec<u8>, hl: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 			
-			let dc: BoundedVec<_, T::MaxCIDLength> =
-				doc_cid.clone().try_into().map_err(|()| Error::<T>::IpfsCIDOverflow)?;
+			let dc: BoundedVec<_, T::MaxURILength> =
+				doc_uri.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
 
 			let hash: BoundedVec<_, T::MaxHashLength> =
 				hl.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
@@ -266,7 +272,7 @@ pub mod pallet {
 			let ndoc: DocMetadata<T> = DocMetadata {
 				version: 1,
 				hl: hash,
-				cid: dc,
+				uri: dc,
 				created: T::TimeProvider::now().as_secs(),
 				active: true
 			};
@@ -307,7 +313,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::DIDDocumentCreated(did.to_vec(), doc_cid));
+			Self::deposit_event(Event::DIDDocumentCreated(did.to_vec(), doc_uri));
 
 			Ok(())
 		}
@@ -592,7 +598,7 @@ pub mod pallet {
 
 		// #[pallet::weight(0)] 
 		// /// record credential onchain
-		// pub fn record_credential(origin: OriginFor<T>, issuer: Vec<u8>, did_str: Vec<u8>, cred_cid: Vec<u8>, hash: Vec<u8>, public: bool, descr: Vec<u8>, vc_addr: Vec<u8>) -> DispatchResult {
+		// pub fn record_credential(origin: OriginFor<T>, issuer: Vec<u8>, did_str: Vec<u8>, cred_uri: Vec<u8>, hash: Vec<u8>, public: bool, descr: Vec<u8>, vc_addr: Vec<u8>) -> DispatchResult {
 		// 	let _who = ensure_signed(origin)?;
 
 		// 	let iss_did: BoundedVec<_, T::MaxDIDLength> =
@@ -604,8 +610,8 @@ pub mod pallet {
 		// 	let hl: BoundedVec<_, T::MaxHashLength> = 
 		// 		hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 
-		// 	let cid: BoundedVec<_, T::MaxCIDLength> =
-		// 		cred_cid.clone().try_into().map_err(|()| Error::<T>::IpfsCIDOverflow)?;
+		// 	let uri: BoundedVec<_, T::MaxURILength> =
+		// 		cred_uri.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
 
 		// 	let desc: BoundedVec<_, T::MaxHashLength> = 
 		// 		descr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
@@ -614,7 +620,7 @@ pub mod pallet {
 		// 		vc_addr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 
 		// 	let cred: VCredential<T> = VCredential { 
-		// 		hl, cid, 
+		// 		hl, uri, 
 		// 		created: T::TimeProvider::now().as_secs(),
 		// 		active: true,
 		// 		desc,
@@ -641,14 +647,14 @@ pub mod pallet {
 		// }
 
 		#[pallet::weight(0)] 
-		pub fn add_resource(origin: OriginFor<T>, did_str: Vec<u8>, addr_cid: Vec<u8>, public: bool, name_: Vec<u8>, descr: Vec<u8>) -> DispatchResult {
+		pub fn add_resource(origin: OriginFor<T>, did_str: Vec<u8>, addr_uri: Vec<u8>, public: bool, name_: Vec<u8>, descr: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
-			let cid: BoundedVec<_, T::MaxCIDLength> =
-				addr_cid.clone().try_into().map_err(|()| Error::<T>::IpfsCIDOverflow)?;
+			let uri: BoundedVec<_, T::MaxURILength> =
+				addr_uri.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
 
 			let name: BoundedVec<_, T::MaxHashLength> = 
 				name_.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
@@ -674,7 +680,7 @@ pub mod pallet {
 			let data: DataFile<T> = DataFile { 
 				name: _nw_name,
 				desc: _nw_desc,
-				cid,
+				uri,
 				created: T::TimeProvider::now().as_secs(),
 				public
 			};
@@ -687,10 +693,50 @@ pub mod pallet {
 			DataRegistry::<T>::insert(&did, dlist);
 
 			// emit event
-			Self::deposit_event(Event::DataAddedToNetwork(did_str, addr_cid));
+			Self::deposit_event(Event::DataAddedToNetwork(did_str, addr_uri));
 
 			Ok(())
 		}
+
+		// const transfer = api.tx.samaritan.getResource(did, auth.is_auth, frags[1], frags[4], frags[5]);
+		#[pallet::weight(0)] 
+		pub fn fetch_resource(origin: OriginFor<T>, did_str: Vec<u8>, is_owner: bool, height: u64) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let mut _uri: Vec<u8>;
+
+			match DataRegistry::<T>::get(&did) {
+				Some(datafiles) => {
+					match datafiles.get(height as usize) {
+						Some(file) => {
+							// check for privacy clause
+							if !file.public && !is_owner {
+								// throw error
+								return Err(Error::<T>::ResourceIsPrivate.into());
+							}
+							_uri = file.uri.to_vec().clone();
+						},
+						None => {
+							// throw error
+							return Err(Error::<T>::ResourceNotFound.into());
+						}
+					}
+				},
+				None => {
+					// throw error
+					return Err(Error::<T>::ResourceNotFound.into());
+				}
+			}
+
+			// emit event
+			Self::deposit_event(Event::FetchResourceURI(_uri));
+
+			Ok(())
+		}
+
 
 	}
 }
