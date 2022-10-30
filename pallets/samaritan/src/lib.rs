@@ -47,6 +47,18 @@ use sp_core::H256;
 		active: bool
 	}
 
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+	#[scale_info(skip_type_params(T))]
+	#[codec(mel_bound())]
+	pub struct VCredential<T: Config> {
+		hl: BoundedVec<u8, T::MaxHashLength>,
+		cid: BoundedVec<u8, T::MaxCIDLength>,
+		created: u64,
+		active: bool,
+		desc: BoundedVec<u8, T::MaxHashLength>,
+		public: bool
+	}
+
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
@@ -74,6 +86,15 @@ use sp_core::H256;
 		#[pallet::constant]
 		type MaxQuorumMembersCount: Get<u32>;
 
+		#[pallet::constant]
+		type MaxCredentialsCount: Get<u32>;
+
+		#[pallet::constant]
+		type MaxResourceAddressLength: Get<u32>;
+
+		#[pallet::constant]
+		type MaxSigListHeight: Get<u32>;
+
 	}
 
 	#[pallet::pallet]
@@ -93,8 +114,20 @@ use sp_core::H256;
 	pub(super) type DocMetaRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<DocMetadata<T>, T::MaxCacheLength>>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn vcred_reg)]
+	pub(super) type VCredRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<VCredential<T>, T::MaxCredentialsCount>>;
+
+	#[pallet::storage]
 	#[pallet::getter(fn trust_quorum)]
 	pub(super) type TrustQuorum<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<BoundedVec<u8, T::MaxDIDLength>, T::MaxQuorumMembersCount>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn vc_issuelist)]
+	pub(super) type VCSigList<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<BoundedVec<u8, T::MaxResourceAddressLength>, T::MaxSigListHeight>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn vc_nonce)]
+	pub(super) type VCNonce<T: Config> = StorageValue<_, u64>;
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -115,6 +148,10 @@ use sp_core::H256;
 		RetrieveQuorumMembers { did: Vec<u8>, names: Vec<Vec<u8>> },
 		/// changed a samaritans auth signature
 		AuthSigModified { hash: H256, key: H256 }
+		/// fetch important figures for VC construction
+		FetchVCIndexes(u64, u64, u64),
+		/// verifiable credential has been created
+		VCredentialCreated(Vec<u8>, Vec<u8>)
 	}
 
 	// Errors inform users that something went wrong.
@@ -137,7 +174,11 @@ use sp_core::H256;
 		/// Quorum filled up
 		QuorumOverflow,
 		/// Duplicate member
-		DuplicateQuorumMember
+		DuplicateQuorumMember,
+		/// Credential list overflow
+		CredListOverflow,
+		/// Maximum signature count on a credential attanined
+		VCSigListOverflow
 	}
 
 	#[pallet::call]
@@ -417,6 +458,116 @@ use sp_core::H256;
 
 			Ok(())
 		}
+
+		#[pallet::weight(0)] 
+		/// get important indexes to contruct a credential
+		pub fn get_indexes(origin: OriginFor<T>, did_str: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let mut nonce = 1;
+			let mut height = 0;
+			let mut _version = 0;
+
+			// select current vc registry nonce
+			match VCNonce::<T>::get() {
+				Some(n) => {
+					nonce = n;
+				},
+				None => {
+					// initialize nonce
+					VCNonce::<T>::put(1);
+				}
+			}
+
+			// select a samaritans credential height
+			match VCredRegistry::<T>::get(&did) {
+				Some(creds) => {
+					height = creds.len() as u64;
+				},
+				None => {
+					// do nothing
+				}
+			}
+
+			// select version of latest DID document
+			match DocMetaRegistry::<T>::get(&did) {
+				Some(doc) => {
+					let mut index = 0;
+					for _d in &doc {
+						index += 1;
+					}
+
+					let d_vec = doc.into_inner();
+					_version = d_vec[index - 1].version;
+				},
+
+				None => {
+					// throw error
+					return Err(Error::<T>::DIDMetaNotFound.into());
+				}
+			}
+
+
+			// emit event
+			Self::deposit_event(Event::FetchVCIndexes(nonce, _version, height));
+
+			Ok(())
+		}
+
+		// const tx = api.tx.samaritan.recordCredential(auth.did, rcred.id, cid, hash, rcred.scope, purpose);
+		#[pallet::weight(0)] 
+		/// record credential onchain
+		pub fn record_credential(origin: OriginFor<T>, issuer: Vec<u8>, did_str: Vec<u8>, cred_cid: Vec<u8>, hash: Vec<u8>, public: bool, descr: Vec<u8>, vc_addr: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let iss_did: BoundedVec<_, T::MaxDIDLength> =
+				issuer.clone().try_into().map_err(|()| Error::<T>::NameOverflow)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let hl: BoundedVec<_, T::MaxHashLength> = 
+				hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			let cid: BoundedVec<_, T::MaxCIDLength> =
+				cred_cid.clone().try_into().map_err(|()| Error::<T>::IpfsCIDOverflow)?;
+
+			let desc: BoundedVec<_, T::MaxHashLength> = 
+				descr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			let addr: BoundedVec<u8, T::MaxResourceAddressLength> = 
+				vc_addr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			let cred: VCredential<T> = VCredential { 
+				hl, cid, 
+				created: T::TimeProvider::now().as_secs(),
+				active: true,
+				desc,
+				public
+			};
+
+			// its the samaritan the credential is about that would be recorded
+			let mut clist: BoundedVec<VCredential<T>, T::MaxCredentialsCount> = Default::default();
+			clist.try_push(cred).map_err(|()| Error::<T>::CredListOverflow)?;
+
+			// save to storage
+			VCredRegistry::<T>::insert(&did, clist);
+
+			// record signature on the credential
+			let mut addr_list: BoundedVec<BoundedVec<u8, T::MaxResourceAddressLength>, T::MaxSigListHeight> = Default::default();
+			addr_list.try_push(addr).map_err(|()| Error::<T>::VCSigListOverflow)?;
+
+			VCSigList::<T>::insert(&iss_did, addr_list);
+
+			// emit event
+			Self::deposit_event(Event::VCredentialCreated(did_str, vc_addr));
+
+			Ok(())
+		}
+
 
 	}
 }
