@@ -2,31 +2,31 @@
 
 pub use pallet::*;
 
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
-
-// use frame_support::BoundedVec;
 
 use scale_info::prelude::vec::Vec;
 use scale_info::prelude::string::String;
 
 #[frame_support::pallet]
 pub mod pallet {
-	// use core::str::FromStr;
- 
-	// use core::ops::Bound;
-	// use parity_scale_codec::alloc::string::ToString;
-	use scale_info::prelude::format;
 
 	use frame_support::{pallet_prelude::{*, DispatchResult}, BoundedVec};
+	use frame_support::{traits::UnixTime};
 	use frame_system::pallet_prelude::*;
 
 	use scale_info::prelude::vec::Vec;
-	// use scale_info::prelude::string::String;
-
-	use frame_support::traits::UnixTime;
+use sp_core::H256;
 
 	// important structs
+
+	// Used to track the name and account of a samaritan
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
@@ -36,12 +36,13 @@ pub mod pallet {
 		pub account_id: T::AccountId
     }
 
+	// Metadata for a document that a samaritan can create
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
 	pub struct DocMetadata<T: Config> {
 		pub version: u64,
-		pub hl: BoundedVec<u8, T::MaxHashLength>,
+		pub hl: H256,
 		pub uri: BoundedVec<u8, T::MaxURILength>,
 		pub created: u64,
 		pub active: bool
@@ -73,23 +74,27 @@ pub mod pallet {
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		
+		// Some way to timestamp document creation 
 		type TimeProvider: UnixTime;
 
+		// DID length must be bounded.
 		#[pallet::constant]
 		type MaxDIDLength: Get<u32>;
 
+		// User name length must be bounded.
 		#[pallet::constant]
 		type MaxNameLength: Get<u32>;
 
-		#[pallet::constant]
-		type MaxHashLength: Get<u32>;
-
+		// CID length must be bounded.
 		#[pallet::constant]
 		type MaxURILength: Get<u32>;
 
+		// Cache length must be bounded.
 		#[pallet::constant]
 		type MaxCacheLength: Get<u32>;
 
+		// Quorum size must be bounded.
 		#[pallet::constant]
 		type MaxQuorumMembersCount: Get<u32>;
 
@@ -117,7 +122,7 @@ pub mod pallet {
 
 	#[pallet::storage]
 	#[pallet::getter(fn authsigs)]
-	pub(super) type AuthSigs<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxHashLength>, BoundedVec<u8, T::MaxDIDLength>>;
+	pub(super) type AuthSigs<T: Config> = StorageMap<_, Twox64Concat, H256, BoundedVec<u8, T::MaxDIDLength>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn doc_metareg)]
@@ -157,21 +162,21 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// creation of a Samaritan
-		SamaritanCreated(Vec<u8>, Vec<u8>),
+		SamaritanCreated { name: Vec<u8>, did: Vec<u8> },
 		/// creation of DID document
-		DIDDocumentCreated(Vec<u8>, Vec<u8>),
+		DIDDocumentCreated { did: Vec<u8>, cid: Vec<u8> },
 		/// fetch did address
-		DIDAddrFetched(Vec<u8>),
+		DIDAddrFetched { did: Vec<u8> },
 		/// changed the name of a Samaritan
-		SamaritanNameChanged(Vec<u8>, Vec<u8>),
+		SamaritanNameChanged { name: Vec<u8>, did: Vec<u8> },
 		/// changed the visibility scope of a Samaritan
-		SamaritanScopeChanged(Vec<u8>, bool),
+		SamaritanScopeChanged { did: Vec<u8>, state: bool },
 		/// quorum updated
-		TrustQuorumUpdated(Vec<u8>, Vec<u8>),
+		TrustQuorumUpdated { did: Vec<u8>, trust_did: Vec<u8> },
 		/// get members of a quorum
-		RetrieveQuorumMembers(Vec<u8>, Vec<Vec<u8>>),
-		/// changed a samaritans auth signature
-		AuthSigModified(Vec<u8>, Vec<u8>),
+		RetrieveQuorumMembers { did: Vec<u8>, names: Vec<Vec<u8>> },
+		/// changed a samaritans auth signatures
+		AuthSigModified { hash: H256, key: H256 }
 		/// fetch important figures for URL construction
 		FetchDataIndexes(u64, u64, u64, Vec<u8>),
 		/// verifiable credential has been created
@@ -191,10 +196,8 @@ pub mod pallet {
 		NameOverflow,
 		/// DID length overflow
 		DIDLengthOverflow,
-		/// URI overflowed
-		IpfsURIOverflow,
-		/// Hash Length overflow
-		HashLengthOverflow,
+		/// CID overflowed
+		IpfsCIDOverflow,
 		/// Cache Oveflow
 		CacheOverflow,
 		/// Hash didn't match any DID
@@ -223,7 +226,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(0)]
 		/// function to create a new Samaritan 
-		pub fn create_samaritan(origin: OriginFor<T>, name: Vec<u8>, did_str: Vec<u8>, hash: Vec<u8>, prov: Vec<u8>) -> DispatchResult {
+		pub fn create_samaritan(origin: OriginFor<T>, name: Vec<u8>, did_str: Vec<u8>, hash: H256, prov: Vec<u8>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			let sn: BoundedVec<_, T::MaxNameLength> =
@@ -248,17 +251,18 @@ pub mod pallet {
 			SamaritanPool::<T>::insert(&did, sam);
 
 			// insert into signature registry
-			AuthSigs::<T>::insert(&sig, did.clone());
+			AuthSigs::<T>::insert(&hash, did.clone());
 
 			// emit event
-			Self::deposit_event(Event::SamaritanCreated(sn.to_vec(), did_str));
+			Self::deposit_event(Event::SamaritanCreated { name: sn.to_vec(), did: did_str } );
 
 			Ok(())
 		}
 
 		#[pallet::weight(0)] 
 		/// DID document has been created on the server, now record it onchain
-		pub fn acknowledge_doc(origin: OriginFor<T>, did_str: Vec<u8>, doc_uri: Vec<u8>, hl: Vec<u8>) -> DispatchResult {
+		pub fn acknowledge_doc(origin: OriginFor<T>, did_str: Vec<u8>, doc_uri: Vec<u8>, hl: H256) -> DispatchResult {
+
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
@@ -267,13 +271,10 @@ pub mod pallet {
 			let dc: BoundedVec<_, T::MaxURILength> =
 				doc_uri.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
 
-			let hash: BoundedVec<_, T::MaxHashLength> =
-				hl.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
-
 			// create metadata
 			let ndoc: DocMetadata<T> = DocMetadata {
-				version: 1,
-				hl: hash,
+				version: 1, // TODO: this should probably be incremented overtime
+				hl,
 				uri: dc,
 				created: T::TimeProvider::now().as_secs(),
 				active: true
@@ -315,22 +316,19 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::DIDDocumentCreated(did.to_vec(), doc_uri));
+			Self::deposit_event(Event::DIDDocumentCreated { did: did.to_vec(), cid: doc_uri });
 
 			Ok(())
 		}
 
 		#[pallet::weight(0)] 
 		/// for auth, get DID with signature
-		pub fn fetch_address(origin: OriginFor<T>, hash: Vec<u8>) -> DispatchResult {
+		pub fn fetch_address(origin: OriginFor<T>, hash: H256) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
-
-			let sig: BoundedVec<_, T::MaxHashLength> = 
-				hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 
 			let mut _did: Vec<u8> = Vec::new();
 			
-			match AuthSigs::<T>::get(&sig) {
+			match AuthSigs::<T>::get(&hash) {
 				Some(addr) => _did = addr.to_vec(),
 				None => {
 					// throw error
@@ -339,7 +337,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::DIDAddrFetched(_did));
+			Self::deposit_event(Event::DIDAddrFetched { did: _did } );
 
 			Ok(())
 		}
@@ -367,7 +365,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::SamaritanNameChanged(sn.to_vec(), did_str));
+			Self::deposit_event(Event::SamaritanNameChanged { name: sn.to_vec(), did: did_str } );
 
 			Ok(())
 		}
@@ -409,7 +407,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::SamaritanScopeChanged(did_str, state));
+			Self::deposit_event(Event::SamaritanScopeChanged { did: did_str, state: state });
 
 			Ok(())
 		}
@@ -459,7 +457,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::TrustQuorumUpdated(did_str, trust_did));
+			Self::deposit_event(Event::TrustQuorumUpdated { did: did_str, trust_did });
 
 			Ok(())
 		}
@@ -489,27 +487,21 @@ pub mod pallet {
 
 
 			// emit event
-			Self::deposit_event(Event::RetrieveQuorumMembers(did_str, list));
+			Self::deposit_event(Event::RetrieveQuorumMembers { did: did_str, names: list });
 
 			Ok(())
 		}
 
 		#[pallet::weight(0)] 
 		/// change the auth sig of a samaritan
-		pub fn change_sig(origin: OriginFor<T>, hk: Vec<u8>, hash_key: Vec<u8>) -> DispatchResult {
+		pub fn change_sig(origin: OriginFor<T>, hk: H256, hash_key: H256) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
-			let hash: BoundedVec<_, T::MaxHashLength> =
-				hk.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
-
-			let new_hash: BoundedVec<_, T::MaxHashLength> =
-				hash_key.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
-
 			// swap signature
-			AuthSigs::<T>::swap(hash, new_hash);
+			AuthSigs::<T>::swap(hk, hash_key);
 
 			// emit event
-			Self::deposit_event(Event::AuthSigModified(hk, hash_key));
+			Self::deposit_event(Event::AuthSigModified {hash: hk, key: hash_key });
 
 			Ok(())
 		}

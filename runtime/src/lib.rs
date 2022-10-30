@@ -269,32 +269,19 @@ impl pallet_template::Config for Runtime {
 	type Event = Event;
 }
 
-parameter_types! {
-	pub const MaxDIDLength: u32 = 128;
-	pub const MaxNameLength: u32 = 128;
-	pub const MaxHashLength: u32 = 6000;
-	pub const MaxURILength: u32 = 128;
-	pub const MaxCacheLength: u32 = 128;
-	pub const MaxQuorumMembersCount: u32 = 3;
-	pub const MaxHoldingsCount: u32 = 10000;
-	pub const MaxResourceAddressLength: u32 = 128; 
-	pub const MaxSigListHeight: u32 = 10000;
-	pub const MaxStringLength: u32 = 10000;
-}
-
+/// The Samaritan pallet manages samaritan DIDs and
+/// provides core functionality for the SamOS.
 impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
-	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
-	type MaxDIDLength =  MaxDIDLength;
-	type MaxNameLength = MaxNameLength;
-	type MaxHashLength =  MaxHashLength;
-	type MaxURILength =  MaxURILength;
-	type MaxCacheLength =  MaxCacheLength;
-	type MaxQuorumMembersCount = MaxQuorumMembersCount;
-	type MaxHoldingsCount = MaxHoldingsCount;
-	type MaxResourceAddressLength = MaxResourceAddressLength;
-	type MaxSigListHeight = MaxSigListHeight;
-	type MaxStringLength = MaxStringLength;
+	type TimeProvider = Timestamp;
+	type MaxDIDLength = ConstU32<128>;
+	type MaxNameLength = ConstU32<128>;
+	type MaxCIDLength = ConstU32<128>;
+	type MaxCacheLength = ConstU32<128>;
+	type MaxQuorumMembersCount = ConstU32<3>;
+	type MaxCredentialsCount = ConstU32<10000>;
+	type MaxResourceAddressLength = ConstU32<128>; 
+	type MaxSigListHeight = ConstU32<10000>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
