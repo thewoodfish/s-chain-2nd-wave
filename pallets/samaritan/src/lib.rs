@@ -16,7 +16,7 @@ pub mod pallet {
  
 	// use core::ops::Bound;
 	// use parity_scale_codec::alloc::string::ToString;
-	// use scale_info::prelude::format;
+	use scale_info::prelude::format;
 
 	use frame_support::{pallet_prelude::{*, DispatchResult}, BoundedVec};
 	use frame_system::pallet_prelude::*;
@@ -32,7 +32,7 @@ pub mod pallet {
 	#[codec(mel_bound())]
 	pub struct Samaritan<T: Config> {
 		pub name: BoundedVec<u8, T::MaxNameLength>,
-		provider: BoundedVec<u8, T::MaxStringLength>,
+		pub provider: BoundedVec<u8, T::MaxStringLength>,
 		pub account_id: T::AccountId
     }
 
@@ -40,20 +40,20 @@ pub mod pallet {
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
 	pub struct DocMetadata<T: Config> {
-		version: u64,
-		hl: BoundedVec<u8, T::MaxHashLength>,
-		uri: BoundedVec<u8, T::MaxURILength>,
-		created: u64,
-		active: bool
+		pub version: u64,
+		pub hl: BoundedVec<u8, T::MaxHashLength>,
+		pub uri: BoundedVec<u8, T::MaxURILength>,
+		pub created: u64,
+		pub active: bool
 	}
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
 	pub struct DataFile<T: Config> {
-		name: Option<BoundedVec<u8, T::MaxHashLength>>,
-		desc: Option<BoundedVec<u8, T::MaxHashLength>>,
 		uri: BoundedVec<u8, T::MaxURILength>,
+		hash: BoundedVec<u8, T::MaxHashLength>,
+		metadata: BoundedVec<u8, T::MaxHashLength>,
 		created: u64,
 		public: bool
 	}
@@ -178,8 +178,10 @@ pub mod pallet {
 		VCredentialCreated(Vec<u8>, Vec<u8>),
 		/// data has been added to the network
 		DataAddedToNetwork(Vec<u8>, Vec<u8>),
-		/// uri of a resource returned
-		FetchResourceURI(Vec<u8>)
+		/// resource data returned
+		ResourceFetched(Vec<u8>, Vec<u8>, Vec<u8>),
+		/// retrieve the metadata of all files
+		FileMetadataRetrieved(Vec<Vec<u8>>)
 	}
 
 	// Errors inform users that something went wrong.
@@ -201,8 +203,6 @@ pub mod pallet {
 		SamaritanNotFound,
 		/// DID metadata not found
 		DIDMetaNotFound,
-		/// Resource not found
-		ResourceNotFound,
 		/// Quorum filled up
 		QuorumOverflow,
 		/// Duplicate member
@@ -214,7 +214,9 @@ pub mod pallet {
 		/// String too long
 		StringLengthOverflow,
 		/// Private resource, cannot view
-		ResourceIsPrivate
+		ResourceIsPrivate,
+		/// Resource not found
+		ResourceNotFound,
 	}
 
 	#[pallet::call]
@@ -513,141 +515,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)] 
-		/// get important indexes to contruct a resource URL
-		pub fn get_indexes(origin: OriginFor<T>, rtype: u64, did_str: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
-
-			let did: BoundedVec<_, T::MaxDIDLength> = 
-				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
-
-			let mut nonce = 1;
-			let mut height = 0;
-			let mut _version = 0;
-			let mut _provider: Vec<u8>;
-
-			// select version of latest DID document
-			match DocMetaRegistry::<T>::get(&did) {
-				Some(doc) => {
-					let mut index = 0;
-					for _d in &doc {
-						index += 1;
-					}
-
-					let d_vec = doc.into_inner();
-					_version = d_vec[index - 1].version;
-				},
-
-				None => {
-					// throw error
-					return Err(Error::<T>::DIDMetaNotFound.into());
-				}
-			}
-
-
-			// select the provider
-			match SamaritanPool::<T>::get(&did) {
-				Some(sam) => {
-					_provider = sam.provider.to_vec()
-				},
-
-				None => {
-					// throw error
-					return Err(Error::<T>::SamaritanNotFound.into());
-				}
-			}
-
-			// [
-			// 	1 => "data",
-			// 	2 => credentials
-			// ]
-
-			match rtype {
-				1 => {	// we have a resource here e.g a PDF
-					// select current data registry nonce
-					match DFNonce::<T>::get() {
-						Some(n) => {
-							nonce = n;
-						},
-						None => {
-							// initialize nonce
-							DFNonce::<T>::put(1);
-						}
-					}
-
-					// select a samaritans data height
-					match DataRegistry::<T>::get(&did) {
-						Some(creds) => {
-							height = creds.len() as u64;
-						},
-						None => {
-							// do nothing
-						}
-					}
-				},
-				2 => {	// verifiable credentials
-					
-				}
-				_ => {}
-			}
-
-			// emit event
-			Self::deposit_event(Event::FetchDataIndexes(nonce, _version, height, _provider));
-
-			Ok(())
-		}
-
-		// #[pallet::weight(0)] 
-		// /// record credential onchain
-		// pub fn record_credential(origin: OriginFor<T>, issuer: Vec<u8>, did_str: Vec<u8>, cred_uri: Vec<u8>, hash: Vec<u8>, public: bool, descr: Vec<u8>, vc_addr: Vec<u8>) -> DispatchResult {
-		// 	let _who = ensure_signed(origin)?;
-
-		// 	let iss_did: BoundedVec<_, T::MaxDIDLength> =
-		// 		issuer.clone().try_into().map_err(|()| Error::<T>::NameOverflow)?;
-
-		// 	let did: BoundedVec<_, T::MaxDIDLength> = 
-		// 		did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
-
-		// 	let hl: BoundedVec<_, T::MaxHashLength> = 
-		// 		hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
-
-		// 	let uri: BoundedVec<_, T::MaxURILength> =
-		// 		cred_uri.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
-
-		// 	let desc: BoundedVec<_, T::MaxHashLength> = 
-		// 		descr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
-
-		// 	let addr: BoundedVec<u8, T::MaxResourceAddressLength> = 
-		// 		vc_addr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
-
-		// 	let cred: VCredential<T> = VCredential { 
-		// 		hl, uri, 
-		// 		created: T::TimeProvider::now().as_secs(),
-		// 		active: true,
-		// 		desc,
-		// 		public
-		// 	};
-
-		// 	// its the samaritan the credential is about that would be recorded
-		// 	let mut clist: BoundedVec<VCredential<T>, T::MaxHoldingsCount> = Default::default();
-		// 	clist.try_push(cred).map_err(|()| Error::<T>::CredListOverflow)?;
-
-		// 	// save to storage
-		// 	VCredRegistry::<T>::insert(&did, clist);
-
-		// 	// record signature on the credential
-		// 	let mut addr_list: BoundedVec<BoundedVec<u8, T::MaxResourceAddressLength>, T::MaxSigListHeight> = Default::default();
-		// 	addr_list.try_push(addr).map_err(|()| Error::<T>::VCSigListOverflow)?;
-
-		// 	VCSigList::<T>::insert(&iss_did, addr_list);
-
-		// 	// emit event
-		// 	Self::deposit_event(Event::VCredentialCreated(did_str, vc_addr));
-
-		// 	Ok(())
-		// }
-
-		#[pallet::weight(0)] 
-		pub fn add_resource(origin: OriginFor<T>, did_str: Vec<u8>, addr_uri: Vec<u8>, public: bool, name_: Vec<u8>, descr: Vec<u8>) -> DispatchResult {
+		pub fn add_resource(origin: OriginFor<T>, did_str: Vec<u8>, addr_uri: Vec<u8>, public: bool, hl: Vec<u8>, meta: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
@@ -656,41 +524,38 @@ pub mod pallet {
 			let uri: BoundedVec<_, T::MaxURILength> =
 				addr_uri.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
 
-			let name: BoundedVec<_, T::MaxHashLength> = 
-				name_.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+			let hash: BoundedVec<_, T::MaxHashLength> =
+				hl.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 
-			let desc: BoundedVec<_, T::MaxHashLength> = 
-				descr.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+			let metadata: BoundedVec<_, T::MaxHashLength> =
+				meta.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
 
-			let mut _nw_name;
-			let mut _nw_desc;
-
-			if name.len() > 0 {
-				_nw_name = Some(name);
-			} else {
-				_nw_name = None;
-			}
-
-			if desc.len() > 0 {
-				_nw_desc = Some(desc);
-			} else {
-				_nw_desc = None;
-			}
-
-			let data: DataFile<T> = DataFile { 
-				name: _nw_name,
-				desc: _nw_desc,
+			let data: DataFile<T> = DataFile {
 				uri,
+				hash,
+				metadata,
 				created: T::TimeProvider::now().as_secs(),
 				public
 			};
 
-			// record holdings
-			let mut dlist: BoundedVec<DataFile<T>, T::MaxHoldingsCount> = Default::default();
-				dlist.try_push(data).map_err(|()| Error::<T>::HoldingsListOverflow)?;
+			// select current lib
+			match DataRegistry::<T>::get(&did) {
+				Some(mut files) => {
+					files.try_push(data).map_err(|()| Error::<T>::HoldingsListOverflow)?;
 
-			// save to storage
-			DataRegistry::<T>::insert(&did, dlist);
+					DataRegistry::<T>::insert(&did, files);
+				},
+				None => {
+					// create new 
+
+					let mut files: BoundedVec<DataFile<T>, T::MaxHoldingsCount> = Default::default();
+
+					files.try_push(data).map_err(|()| Error::<T>::HoldingsListOverflow)?;
+
+					// save to storage
+					DataRegistry::<T>::insert(&did, files);
+				}
+			}
 
 			// emit event
 			Self::deposit_event(Event::DataAddedToNetwork(did_str, addr_uri));
@@ -700,28 +565,35 @@ pub mod pallet {
 
 		// const transfer = api.tx.samaritan.getResource(did, auth.is_auth, frags[1], frags[4], frags[5]);
 		#[pallet::weight(0)] 
-		pub fn fetch_resource(origin: OriginFor<T>, did_str: Vec<u8>, is_owner: bool, height: u64) -> DispatchResult {
+		pub fn fetch_resource(origin: OriginFor<T>, did_str: Vec<u8>, is_owner: bool, hl: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+			
+			let hash: BoundedVec<_, T::MaxHashLength> =
+				hl.clone().try_into().map_err(|()| Error::<T>::IpfsURIOverflow)?;
 
-			let mut _uri: Vec<u8>;
+			let mut _uri: Vec<u8> = Vec::new();
+			let mut _provider: Vec<u8> = Vec::new();
+			let mut _meta: Vec<u8> = Vec::new();
+			let mut _found = false;
 
 			match DataRegistry::<T>::get(&did) {
 				Some(datafiles) => {
-					match datafiles.get(height as usize) {
-						Some(file) => {
+					for f in datafiles {
+						if f.hash == hash {
 							// check for privacy clause
-							if !file.public && !is_owner {
+							if !f.public && !is_owner {
 								// throw error
 								return Err(Error::<T>::ResourceIsPrivate.into());
 							}
-							_uri = file.uri.to_vec().clone();
-						},
-						None => {
-							// throw error
-							return Err(Error::<T>::ResourceNotFound.into());
+
+							_found = true;
+							_uri = f.uri.to_vec().clone();
+							_meta = f.metadata.to_vec().clone();
+
+							break;
 						}
 					}
 				},
@@ -731,12 +603,56 @@ pub mod pallet {
 				}
 			}
 
+			// leave already, if not found
+			if !_found {
+				return Err(Error::<T>::ResourceNotFound.into());
+			}
+
+			match SamaritanPool::<T>::get(&did) {
+				Some(sam) => _provider = sam.provider.to_vec().clone(),
+				None => {
+					// throw error
+					return Err(Error::<T>::ResourceNotFound.into());
+				}
+			}
+
 			// emit event
-			Self::deposit_event(Event::FetchResourceURI(_uri));
+			Self::deposit_event(Event::ResourceFetched(_uri, _provider, _meta));
 
 			Ok(())
 		}
 
+		#[pallet::weight(0)] 
+		/// retrieve metadata & uri of files belonging to a samaritan
+		pub fn fetch_files(origin: OriginFor<T>, did_str: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let mut meta: Vec<Vec<u8>> = Vec::new();
+
+			// select the infos
+			match DataRegistry::<T>::get(&did) {
+				Some(files) => {
+					for f in files {
+						let time = Self::str_to_vec(format!("{}", f.created));
+
+						meta.push(f.hash.to_vec().clone());
+						meta.push(f.metadata.to_vec().clone());
+						meta.push(time.clone());
+					}
+				},
+				None => {
+					// do nothing
+				}
+			}
+
+			// emit event
+			Self::deposit_event(Event::FileMetadataRetrieved(meta));
+
+			Ok(())
+		}
 
 	}
 }
