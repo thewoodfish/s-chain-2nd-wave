@@ -40,6 +40,12 @@ pub mod pallet {
 		type MaxDIDLength: Get<u32>;
 	}
 
+
+	/// trait to help manage the Samaritan filesystem from external pallets
+	pub trait FileSystem {
+		fn create_root_dir(did_str: Vec<u8>, hash: H256, metadata: H256) -> DispatchResult;
+	}
+
 	#[pallet::pallet]
 	#[pallet::generate_store(pub(super) trait Store)]
 	pub struct Pallet<T>(_);
@@ -60,7 +66,9 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// a new file has been uploaded to the internet
-		NewFileAdded { did: Vec<u8>, file_hash: H256 },
+		NewFileAdded { did: Vec<u8>, file_hash: H256, is_dir: bool },
+		/// samaritan file system root directory has been created
+		RootDirCreated { did: Vec<u8>, hash: H256 },
 	}
 
 	// Errors inform users that something went wrong.
@@ -79,7 +87,8 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(0)] 
-		pub fn add_file(origin: OriginFor<T>, did_str: Vec<u8>, metadata: H256, hash: H256, p_dir_hash: H256) -> DispatchResult {
+		/// create a new file node
+		pub fn add_file(origin: OriginFor<T>, did_str: Vec<u8>, metadata: H256, hash: H256, p_dir_hash: H256, is_dir: bool) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
@@ -89,7 +98,7 @@ pub mod pallet {
 				hash: hash.clone(),
 				metadata,
 				permission: 700,	// very private by default
-				is_dir: false,
+				is_dir,
 				created: T::TimeProvider::now().as_secs(),
 				last_access: T::TimeProvider::now().as_secs()
 			};
@@ -123,13 +132,55 @@ pub mod pallet {
 				dir.try_push(hash.clone()).map_err(|()| Error::<T>::FileCountOverflow)?;
 				DirRegistry::<T>::insert(&p_dir_hash, dir);
 
+				// if directory, create a new entry
+				if is_dir {
+					let dir_root: BoundedVec<H256, T::MaxFileCount> = Default::default();
+
+					DirRegistry::<T>::insert(hash.clone(), dir_root);
+				}
+
 			} else {
 				// throw error 
 				return Err(Error::<T>::InvalidDirectory.into());
 			}
 
 			// emit event
-			Self::deposit_event(Event::NewFileAdded { did: did_str, file_hash: hash });
+			Self::deposit_event(Event::NewFileAdded { did: did_str, file_hash: hash, is_dir });
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// create the root node of a samaritan file system
+		pub fn create_root_dir(origin: OriginFor<T>, did_str: Vec<u8>, hash: H256, metadata: H256) -> DispatchResult {
+			let _who = ensure_signed(origin)?;   
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			// the gist is that the root folder is always the first file
+			let root = File {
+				hash: hash.clone(),
+				metadata,
+				permission: 700,	// very private by default
+				is_dir: true,
+				created: T::TimeProvider::now().as_secs(),
+				last_access: T::TimeProvider::now().as_secs()
+			};
+
+			// create new 
+			let mut files: BoundedVec<File, T::MaxFileCount> = Default::default();
+			files.try_push(root).map_err(|()| Error::<T>::FileCountOverflow)?;
+
+			// save to storage
+			FileRegistry::<T>::insert(&did, files);
+
+			// crete entry
+			let dir_root: BoundedVec<H256, T::MaxFileCount> = Default::default();
+				DirRegistry::<T>::insert(hash.clone(), dir_root);
+			
+			// emit event
+			Self::deposit_event(Event::RootDirCreated { did: did_str, hash } );
 
 			Ok(())
 		}

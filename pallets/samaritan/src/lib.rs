@@ -15,6 +15,8 @@ pub mod pallet {
 	use frame_support::{pallet_prelude::{*, DispatchResult}, BoundedVec};
 	use frame_system::pallet_prelude::*;
 
+	use pallet_directory::FileSystem;
+
 	use scale_info::prelude::vec::Vec;
 	use sp_core::H256;
 
@@ -45,6 +47,9 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		type TimeProvider: UnixTime;
+
+		// access filesystem
+		type FileManager: FileSystem;
 
 		#[pallet::constant]
 		type MaxDIDLength: Get<u32>;
@@ -128,7 +133,9 @@ pub mod pallet {
 		/// Duplicate member
 		DuplicateQuorumMember,
 		/// String too long
-		StringLengthOverflow
+		StringLengthOverflow,
+		/// Creation of root directory failed
+		RootDirCreationFailed
 	}
 
 	#[pallet::call]
@@ -158,7 +165,7 @@ pub mod pallet {
 
 			// insert into signature registry
 			AuthSigs::<T>::insert(&hash, did.clone());
-			
+
 			// emit event
 			Self::deposit_event(Event::SamaritanCreated { name: sn.to_vec(), did: did_str } );
 
@@ -219,6 +226,12 @@ pub mod pallet {
 					DocMetaRegistry::<T>::insert(&did, cache);
 				}
 			}
+
+			let bytes: [u8; 32] = [0; 32];
+			let root: H256 = H256(bytes);
+
+			// create root directory
+			T::FileManager::create_root_dir(did_str.clone(), root.clone(), root)?;
 
 			// emit event
 			Self::deposit_event(Event::DIDDocumentCreated { did: did.to_vec(), cid: doc_uri });
