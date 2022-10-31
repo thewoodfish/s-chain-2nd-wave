@@ -48,6 +48,7 @@ pub use pallet_template;
 
 /// All custom templates
 pub use pallet_samaritan;
+pub use pallet_directory;
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -275,13 +276,18 @@ impl pallet_samaritan::Config for Runtime {
 	type Event = Event;
 	type TimeProvider = Timestamp;
 	type MaxDIDLength = ConstU32<128>;
-	type MaxNameLength = ConstU32<128>;
-	type MaxCIDLength = ConstU32<128>;
 	type MaxCacheLength = ConstU32<128>;
 	type MaxQuorumMembersCount = ConstU32<3>;
-	type MaxCredentialsCount = ConstU32<10000>;
-	type MaxResourceAddressLength = ConstU32<128>; 
-	type MaxSigListHeight = ConstU32<10000>;
+	type MaxURILength = ConstU32<128>; 
+	type MaxStringLength = ConstU32<128>; 
+}
+
+/// The Directory pallet manages samaritan files & directory structure.
+impl pallet_directory::Config for Runtime {
+	type Event = Event;
+	type TimeProvider = Timestamp;
+	type MaxDIDLength = ConstU32<128>;
+	type MaxFileCount = ConstU32<128>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -302,6 +308,7 @@ construct_runtime!(
 		// Include the custom logic from the pallet-template in the runtime.
 		TemplateModule: pallet_template,
 		Samaritan: pallet_samaritan,
+		Directory: pallet_directory,
 	}
 );
 
