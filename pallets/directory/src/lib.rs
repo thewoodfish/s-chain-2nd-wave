@@ -13,13 +13,13 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use sp_core::H256;
 	use scale_info::prelude::vec::Vec;
-
+	use scale_info::prelude::format;
 	use frame_support::traits::UnixTime;
 
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
-	pub struct File {
+	pub struct Inode {
 		hash: H256,
 		metadata: H256,
 		permission: u32,
@@ -34,7 +34,7 @@ pub mod pallet {
 		type TimeProvider: UnixTime;
 
 		#[pallet::constant]
-		type MaxFileCount: Get<u32>;
+		type MaxInodeCount: Get<u32>;
 
 		#[pallet::constant]
 		type MaxDIDLength: Get<u32>;
@@ -52,23 +52,25 @@ pub mod pallet {
 
 	#[pallet::storage]
 	#[pallet::getter(fn file_reg)]
-	pub(super) type FileRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<File, T::MaxFileCount>>;
+	pub(super) type InodeRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<Inode, T::MaxInodeCount>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn dir_reg)]
-	pub(super) type DirRegistry<T: Config> = StorageMap<_, Twox64Concat, H256, BoundedVec<H256, T::MaxFileCount>>;
+	pub(super) type DirRegistry<T: Config> = StorageMap<_, Twox64Concat, H256, BoundedVec<H256, T::MaxInodeCount>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn inode_count)]
-	pub(super) type FileCount<T: Config> = StorageValue<_, u64>;
+	pub(super) type InodeCount<T: Config> = StorageValue<_, u64>;
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// a new file has been uploaded to the internet
-		NewFileAdded { did: Vec<u8>, file_hash: H256, is_dir: bool },
+		NewInodeEntryCreated { did: Vec<u8>, file_hash: H256, is_dir: bool, height: u64 },
 		/// samaritan file system root directory has been created
 		RootDirCreated { did: Vec<u8>, hash: H256 },
+		/// file metadata fetched, also containing documents in folder, if folder
+		FileMetaDataFetched { meta: H256, files: Vec<H256> }
 	}
 
 	// Errors inform users that something went wrong.
@@ -78,23 +80,27 @@ pub mod pallet {
 		DIDLengthOverflow,
 		/// Hash Length overflow
 		HashLengthOverflow,
-		// Directory doesn't exist
+		/// Directory doesn't exist
 		InvalidDirectory,
-		// Too many files
-		FileCountOverflow
+		/// Too many files
+		InodeCountOverflow,
+		/// Inode or directory inode not found
+		InvalidInodeEntry,
+		/// Cannot read file because of permissions
+		ReadPermissionDenied
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(0)] 
 		/// create a new file node
-		pub fn add_file(origin: OriginFor<T>, did_str: Vec<u8>, metadata: H256, hash: H256, p_dir_hash: H256, is_dir: bool) -> DispatchResult {
+		pub fn add_inode(origin: OriginFor<T>, did_str: Vec<u8>, metadata: H256, hash: H256, p_dir_hash: H256, is_dir: bool) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
-			let file = File {
+			let file = Inode {
 				hash: hash.clone(),
 				metadata,
 				permission: 700,	// very private by default
@@ -103,38 +109,42 @@ pub mod pallet {
 				last_access: T::TimeProvider::now().as_secs()
 			};
 
+			// height of nodes owned by a Samaritan
+			let mut height = 0;
+
 			// save under directory
 			if let Some(mut dir) = DirRegistry::<T>::get(&p_dir_hash) {
 
 				// select current lib
-				match FileRegistry::<T>::get(&did) {
+				match InodeRegistry::<T>::get(&did) {
 					Some(mut files) => {
-						files.try_push(file).map_err(|()| Error::<T>::FileCountOverflow)?;
+						height = files.len() as u64;
 
-						FileRegistry::<T>::insert(&did, files);
+						files.try_push(file).map_err(|()| Error::<T>::InodeCountOverflow)?;
+						InodeRegistry::<T>::insert(&did, files);
 					},
 					None => {
 						// create new 
-						let mut files: BoundedVec<File, T::MaxFileCount> = Default::default();
+						let mut files: BoundedVec<Inode, T::MaxInodeCount> = Default::default();
 
-						files.try_push(file).map_err(|()| Error::<T>::FileCountOverflow)?;
+						files.try_push(file).map_err(|()| Error::<T>::InodeCountOverflow)?;
 
 						// save to storage
-						FileRegistry::<T>::insert(&did, files);
+						InodeRegistry::<T>::insert(&did, files);
 					}
 				}
 
 				// increase file count
-				if let Some(count) = FileCount::<T>::get() {
-					FileCount::<T>::put(count + 1);
+				if let Some(count) = InodeCount::<T>::get() {
+					InodeCount::<T>::put(count + 1);
 				}
 
-				dir.try_push(hash.clone()).map_err(|()| Error::<T>::FileCountOverflow)?;
+				dir.try_push(hash.clone()).map_err(|()| Error::<T>::InodeCountOverflow)?;
 				DirRegistry::<T>::insert(&p_dir_hash, dir);
 
 				// if directory, create a new entry
 				if is_dir {
-					let dir_root: BoundedVec<H256, T::MaxFileCount> = Default::default();
+					let dir_root: BoundedVec<H256, T::MaxInodeCount> = Default::default();
 
 					DirRegistry::<T>::insert(hash.clone(), dir_root);
 				}
@@ -145,7 +155,7 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::NewFileAdded { did: did_str, file_hash: hash, is_dir });
+			Self::deposit_event(Event::NewInodeEntryCreated { did: did_str, file_hash: hash, is_dir, height });
 
 			Ok(())
 		}
@@ -159,7 +169,7 @@ pub mod pallet {
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
 			// the gist is that the root folder is always the first file
-			let root = File {
+			let root = Inode {
 				hash: hash.clone(),
 				metadata,
 				permission: 700,	// very private by default
@@ -169,18 +179,76 @@ pub mod pallet {
 			};
 
 			// create new 
-			let mut files: BoundedVec<File, T::MaxFileCount> = Default::default();
-			files.try_push(root).map_err(|()| Error::<T>::FileCountOverflow)?;
+			let mut files: BoundedVec<Inode, T::MaxInodeCount> = Default::default();
+			files.try_push(root).map_err(|()| Error::<T>::InodeCountOverflow)?;
 
 			// save to storage
-			FileRegistry::<T>::insert(&did, files);
+			InodeRegistry::<T>::insert(&did, files);
 
 			// crete entry
-			let dir_root: BoundedVec<H256, T::MaxFileCount> = Default::default();
+			let dir_root: BoundedVec<H256, T::MaxInodeCount> = Default::default();
 				DirRegistry::<T>::insert(hash.clone(), dir_root);
 			
 			// emit event
 			Self::deposit_event(Event::RootDirCreated { did: did_str, hash } );
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// fetch metadata of file or dir
+		pub fn fetch_metadata(origin: OriginFor<T>, did_str: Vec<u8>, owner_did: Vec<u8>, index: u64, hash: H256) -> DispatchResult {
+			let _who = ensure_signed(origin)?;   
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let o_did: BoundedVec<_, T::MaxDIDLength> = 
+				owner_did.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let bytes: [u8; 32] = [0; 32];
+			let mut metadata: H256 = H256(bytes);
+
+			let mut files: Vec<H256> = Vec::new();
+			let mut is_dir = false;
+
+			// first select the file
+			if let Some(inodes) = InodeRegistry::<T>::get(&o_did) {
+				// find the specific entry
+				let inode = &inodes[index as usize];
+
+				// confirm inode is valid
+				if inode.hash != hash {
+					// throw error
+					return Err(Error::<T>::InvalidInodeEntry.into());
+				}
+
+				// now check access permissions
+				if did != o_did {
+					let perm = format!("{}", inode.permission);
+					if u64::from(Self::str_to_vec(perm)[2]) < 4 {
+						// throw error
+						return Err(Error::<T>::ReadPermissionDenied.into());
+					}
+				} else {
+					// get metadata
+					metadata = inode.metadata.clone();
+
+					// if inode is for a directory, return all files/dirs it contains, 
+					// along with metadata
+					if let Some(contained) = DirRegistry::<T>::get(&hash) {
+						for f in contained {
+							files.push(f.clone());
+						}
+					}
+				}
+			} else {
+				// throw error
+				return Err(Error::<T>::InvalidInodeEntry.into());
+			}
+
+			// emit event
+			Self::deposit_event(Event::FileMetaDataFetched { meta: metadata, files } );
 
 			Ok(())
 		}

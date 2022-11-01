@@ -288,7 +288,7 @@ impl pallet_directory::Config for Runtime {
 	type Event = Event;
 	type TimeProvider = Timestamp;
 	type MaxDIDLength = ConstU32<128>;
-	type MaxFileCount = ConstU32<128>;
+	type MaxInodeCount = ConstU32<128>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

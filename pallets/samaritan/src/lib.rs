@@ -5,8 +5,6 @@ pub use pallet::*;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-// use frame_support::BoundedVec;
-
 use scale_info::prelude::vec::Vec;
 use scale_info::prelude::string::String;
 
