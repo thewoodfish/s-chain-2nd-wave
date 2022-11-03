@@ -9,6 +9,8 @@ use scale_info::prelude::string::String;
 
 #[frame_support::pallet]
 pub mod pallet {
+	// use core::default;
+
 	use frame_support::{pallet_prelude::{*, DispatchResult}, BoundedVec};
 	use frame_system::pallet_prelude::*;
 	use sp_core::H256;
@@ -24,6 +26,8 @@ pub mod pallet {
 		metadata: H256,
 		permission: u32,
 		is_dir: bool,
+		parent: Option<H256>,
+		index: u64,
 		created: u64,
 		last_access: u64
 	}
@@ -70,7 +74,13 @@ pub mod pallet {
 		/// samaritan file system root directory has been created
 		RootDirCreated { did: Vec<u8>, hash: H256 },
 		/// file metadata fetched, also containing documents in folder, if folder
-		FileMetaDataFetched { meta: H256, files: Vec<H256> }
+		FileMetaDataFetched { meta: H256, files: Vec<H256> },
+		/// inode has been deleted,
+		InodeEntryDeleted { hash: H256, is_dir: bool },
+		/// inode access permissions has been modified
+		InodePermissionModified { hash: H256, old_mode: u32, mode: u32 },
+		/// inode ownership has been transferred
+		InodeOwnerChanged { hash: H256, old_owner: Vec<u8>, owner: Vec<u8> }
 	}
 
 	// Errors inform users that something went wrong.
@@ -86,8 +96,53 @@ pub mod pallet {
 		InodeCountOverflow,
 		/// Inode or directory inode not found
 		InvalidInodeEntry,
-		/// Cannot read file because of permissions
-		ReadPermissionDenied
+		/// Cannot perform operation on inode
+		PermissionDenied,
+		/// Cannot delete a dir because its not empty
+		DirectoryNotEmpty,
+		/// Buffer overflow
+		BufferOverflow
+	}
+
+	impl<T: Config> FileSystem for Pallet<T> {
+		/// create the root node of a samaritan file system
+		fn create_root_dir(did_str: Vec<u8>, hash: H256, metadata: H256) -> DispatchResult {
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			// the gist is that the root folder is always the first file
+			let root = Inode {
+				hash: hash.clone(),
+				metadata,
+				permission: 700,	// very private by default
+				is_dir: true,
+				parent: None,
+				index: 0,
+				created: T::TimeProvider::now().as_secs(),
+				last_access: T::TimeProvider::now().as_secs()
+			};
+
+			// create new 
+			let mut files: BoundedVec<Inode, T::MaxInodeCount> = Default::default();
+			files.try_push(root).map_err(|()| Error::<T>::InodeCountOverflow)?;
+
+			// save to storage
+			InodeRegistry::<T>::insert(&did, files);
+
+			// crete entry
+			let dir_root: BoundedVec<H256, T::MaxInodeCount> = Default::default();
+				DirRegistry::<T>::insert(hash.clone(), dir_root);
+		
+			// increase inode count
+			if let Some(count) = InodeCount::<T>::get() {
+				InodeCount::<T>::put(count + 1);
+			}
+			
+			// emit event
+			Self::deposit_event(Event::RootDirCreated { did: did_str, hash } );
+
+			Ok(())
+		}
 	}
 
 	#[pallet::call]
@@ -100,11 +155,13 @@ pub mod pallet {
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
-			let file = Inode {
+			let mut file = Inode {
 				hash: hash.clone(),
 				metadata,
 				permission: 700,	// very private by default
 				is_dir,
+				parent: Some(p_dir_hash),
+				index: 0, 	// this might change when we get find the height
 				created: T::TimeProvider::now().as_secs(),
 				last_access: T::TimeProvider::now().as_secs()
 			};
@@ -120,6 +177,9 @@ pub mod pallet {
 					Some(mut files) => {
 						height = files.len() as u64;
 
+						// set height, for easy retrieval
+						file.index = dir.len() as u64;
+						
 						files.try_push(file).map_err(|()| Error::<T>::InodeCountOverflow)?;
 						InodeRegistry::<T>::insert(&did, files);
 					},
@@ -145,7 +205,6 @@ pub mod pallet {
 				// if directory, create a new entry
 				if is_dir {
 					let dir_root: BoundedVec<H256, T::MaxInodeCount> = Default::default();
-
 					DirRegistry::<T>::insert(hash.clone(), dir_root);
 				}
 
@@ -161,42 +220,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		/// create the root node of a samaritan file system
-		pub fn create_root_dir(origin: OriginFor<T>, did_str: Vec<u8>, hash: H256, metadata: H256) -> DispatchResult {
-			let _who = ensure_signed(origin)?;   
-
-			let did: BoundedVec<_, T::MaxDIDLength> = 
-				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
-
-			// the gist is that the root folder is always the first file
-			let root = Inode {
-				hash: hash.clone(),
-				metadata,
-				permission: 700,	// very private by default
-				is_dir: true,
-				created: T::TimeProvider::now().as_secs(),
-				last_access: T::TimeProvider::now().as_secs()
-			};
-
-			// create new 
-			let mut files: BoundedVec<Inode, T::MaxInodeCount> = Default::default();
-			files.try_push(root).map_err(|()| Error::<T>::InodeCountOverflow)?;
-
-			// save to storage
-			InodeRegistry::<T>::insert(&did, files);
-
-			// crete entry
-			let dir_root: BoundedVec<H256, T::MaxInodeCount> = Default::default();
-				DirRegistry::<T>::insert(hash.clone(), dir_root);
-			
-			// emit event
-			Self::deposit_event(Event::RootDirCreated { did: did_str, hash } );
-
-			Ok(())
-		}
-
-		#[pallet::weight(0)]
-		/// fetch metadata of file or dir
+		/// fetch inode metadata
 		pub fn fetch_metadata(origin: OriginFor<T>, did_str: Vec<u8>, owner_did: Vec<u8>, index: u64, hash: H256) -> DispatchResult {
 			let _who = ensure_signed(origin)?;   
 
@@ -206,11 +230,9 @@ pub mod pallet {
 			let o_did: BoundedVec<_, T::MaxDIDLength> = 
 				owner_did.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
-			let bytes: [u8; 32] = [0; 32];
-			let mut metadata: H256 = H256(bytes);
+			let mut _metadata: H256;
 
 			let mut files: Vec<H256> = Vec::new();
-			let mut is_dir = false;
 
 			// first select the file
 			if let Some(inodes) = InodeRegistry::<T>::get(&o_did) {
@@ -224,21 +246,23 @@ pub mod pallet {
 				}
 
 				// now check access permissions
-				if did != o_did {
-					let perm = format!("{}", inode.permission);
-					if u64::from(Self::str_to_vec(perm)[2]) < 4 {
-						// throw error
-						return Err(Error::<T>::ReadPermissionDenied.into());
-					}
+				let perm = format!("{}", inode.permission);
+				
+				if did != o_did && u64::from(Self::str_to_vec(perm)[2]) < 4 {
+					// throw error
+					return Err(Error::<T>::PermissionDenied.into());
 				} else {
 					// get metadata
-					metadata = inode.metadata.clone();
+					_metadata = inode.metadata.clone();
 
 					// if inode is for a directory, return all files/dirs it contains, 
 					// along with metadata
-					if let Some(contained) = DirRegistry::<T>::get(&hash) {
-						for f in contained {
-							files.push(f.clone());
+					if inode.is_dir {
+						if let Some(contained) = DirRegistry::<T>::get(&hash) {
+							for f in contained {
+								files.push(f.clone());
+							}
+
 						}
 					}
 				}
@@ -248,10 +272,132 @@ pub mod pallet {
 			}
 
 			// emit event
-			Self::deposit_event(Event::FileMetaDataFetched { meta: metadata, files } );
+			Self::deposit_event(Event::FileMetaDataFetched { meta: _metadata, files } );
 
 			Ok(())
 		}
+
+		#[pallet::weight(0)]
+		/// delete a file or a directory
+		pub fn unlink_inode(origin: OriginFor<T>, did_str: Vec<u8>, owner_did: Vec<u8>, index: u64, hash: H256) -> DispatchResult {
+			let _who = ensure_signed(origin)?;   
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let o_did: BoundedVec<_, T::MaxDIDLength> = 
+				owner_did.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let mut _is_dir = false;
+
+			// first select the inode
+			if let Some(mut inodes) = InodeRegistry::<T>::get(&o_did) {
+				// find the specific entry
+				let inode = &inodes[index as usize];
+
+				// confirm inode is valid
+				if inode.hash != hash {
+					// throw error
+					return Err(Error::<T>::InvalidInodeEntry.into());
+				}
+
+				// now check access permissions
+				let perm = format!("{}", inode.permission);
+				let bytes: [u8; 32] = [0; 32];
+				let default: H256 = H256(bytes);
+				
+				if did != o_did && u64::from(Self::str_to_vec(perm)[2]) != 7 {	
+					// throw error
+					return Err(Error::<T>::PermissionDenied.into());
+				} else {
+					// if its a directory
+					if inode.is_dir {
+						// , make sure its empty
+						if let Some(dir) = DirRegistry::<T>::get(&inode.hash) {
+							if dir.len() != 0 {
+								// throw error
+								return Err(Error::<T>::DirectoryNotEmpty.into());
+							} else {
+								// dir is empty, deletion can proceed
+								DirRegistry::<T>::remove(inode.hash);
+							}
+						}
+
+						_is_dir = true;
+					}
+
+					// first unlink it from its parent
+					if let Some(mut parent) = DirRegistry::<T>::get(&inode.parent.unwrap_or(default)) {
+						// get the entry in the parents root
+						parent.remove(inode.index as usize);	// panics
+					}
+
+					// delete inode entry
+					inodes.remove(index as usize);
+				}
+			} else {
+				// throw error
+				return Err(Error::<T>::InvalidInodeEntry.into());
+			}
+
+			// emit event
+			Self::deposit_event(Event::InodeEntryDeleted { hash, is_dir: _is_dir } );
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// change the permission mode of an inode
+		pub fn change_permission(origin: OriginFor<T>, did_str: Vec<u8>, owner_did: Vec<u8>, index: u64, hash: H256, mode: u32) -> DispatchResult {
+			let _who = ensure_signed(origin)?;   
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let o_did: BoundedVec<_, T::MaxDIDLength> = 
+				owner_did.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let mut _is_dir = false;
+			let mut _old_mode = 007;	// james bond, cool
+
+			// first select the inode
+			if let Some(mut inodes) = InodeRegistry::<T>::get(&o_did) {
+				// find the specific entry
+				let inode = &mut inodes[index as usize];
+
+				// confirm inode is valid
+				if inode.hash != hash {
+					// throw error
+					return Err(Error::<T>::InvalidInodeEntry.into());
+				}
+
+				// now check access permissions
+				let perm = format!("{}", inode.permission);
+				
+				if did != o_did && u64::from(Self::str_to_vec(perm)[2]) != 7 {	
+					// throw error
+					return Err(Error::<T>::PermissionDenied.into());
+				} else {
+					// change permission
+					_old_mode = inode.permission;
+
+					let mut new_inode = inode.clone();
+					new_inode.permission = mode;
+					*inode = new_inode;
+
+					InodeRegistry::<T>::insert(&o_did, inodes);
+				}
+			} else {
+				// throw error
+				return Err(Error::<T>::InvalidInodeEntry.into());
+			}
+
+			// emit event
+			Self::deposit_event(Event::InodePermissionModified { hash, old_mode: _old_mode, mode } );
+
+			Ok(())
+		}
+
 	}
 }
 
