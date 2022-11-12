@@ -1,3 +1,14 @@
+//! Directory pallet
+//! 
+//! Files and directories are accessible using this pallet.
+//! Each file and directory have different permissions used to manage access for the files.
+//! 
+//! 	permission: 000 - files or directories with this permission means no entity or user can access this file. 
+//! 	permission: 400 - any permission equal to or greater than 4 means the user has read access.
+//! 	permission: 700 - any permission equal to or greater than 7 means the user has read and write access.
+//! 
+//! Every time a file is created on the network, the permissions are checked to ensure specific groups have the authorization for creating, modifying or deleting files,
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
@@ -18,11 +29,12 @@ pub mod pallet {
 	use scale_info::prelude::format;
 	use frame_support::traits::UnixTime;
 
+	// The Inode object  
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(T))]
 	#[codec(mel_bound())]
 	pub struct Inode {
-		hash: H256,
+		hash: H256, // TODO: remove this field
 		metadata: H256,
 		permission: u32,
 		is_dir: bool,
@@ -34,7 +46,8 @@ pub mod pallet {
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
 		type TimeProvider: UnixTime;
 
 		#[pallet::constant]
@@ -54,9 +67,16 @@ pub mod pallet {
 	#[pallet::generate_store(pub(super) trait Store)]
 	pub struct Pallet<T>(_);
 
+	// Storage map for tracking files and directories
+	// This maps the DID with the Inode tree 
 	#[pallet::storage]
 	#[pallet::getter(fn file_reg)]
-	pub(super) type InodeRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<Inode, T::MaxInodeCount>>;
+	pub(super) type InodeRegistry<T: Config> = 
+		StorageMap<_, 
+		Twox64Concat, 
+		BoundedVec<u8, T::MaxDIDLength>, 
+		BoundedVec<Inode, T::MaxInodeCount>
+		>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn dir_reg)]
@@ -149,13 +169,22 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(0)] 
 		/// create a new file node
-		pub fn add_inode(origin: OriginFor<T>, did_str: Vec<u8>, metadata: H256, hash: H256, p_dir_hash: H256, is_dir: bool) -> DispatchResult {
+		pub fn add_inode(
+			origin: OriginFor<T>, 
+			did_str: Vec<u8>, 
+			metadata: H256, 
+			hash: H256, 
+			p_dir_hash: H256, 
+			is_dir: bool
+		) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 
 				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
 
 			let mut file = Inode {
+				// TODO: this could be the concat(Twox(dir_name) + Twox(method))
+				// this would be more like the path to a file
 				hash: hash.clone(),
 				metadata,
 				permission: 700,	// very private by default
@@ -221,7 +250,13 @@ pub mod pallet {
 
 		#[pallet::weight(0)]
 		/// fetch inode metadata
-		pub fn fetch_metadata(origin: OriginFor<T>, did_str: Vec<u8>, owner_did: Vec<u8>, index: u64, hash: H256) -> DispatchResult {
+		pub fn fetch_metadata(
+			origin: OriginFor<T>, 
+			did_str: Vec<u8>, 
+			owner_did: Vec<u8>, 
+			index: u64, 
+			hash: H256
+		) -> DispatchResult {
 			let _who = ensure_signed(origin)?;   
 
 			let did: BoundedVec<_, T::MaxDIDLength> = 

@@ -43,7 +43,7 @@ pub mod pallet {
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type TimeProvider: UnixTime;
 
 		// access filesystem
@@ -229,7 +229,7 @@ pub mod pallet {
 			let root: H256 = H256(bytes);
 
 			// create root directory
-			T::FileManager::create_root_dir(did_str.clone(), root.clone(), root)?;
+			T::FileManager::create_root_dir(did_str.clone(), root.clone(), root);
 
 			// emit event
 			Self::deposit_event(Event::DIDDocumentCreated { did: did.to_vec(), cid: doc_uri });
@@ -446,4 +446,3 @@ impl<T: Config> Pallet<T> {
 		bytes
 	}
 }
-
