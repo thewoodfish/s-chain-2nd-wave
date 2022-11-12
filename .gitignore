@@ -2,3 +2,4 @@ docs
 scripts
 target
 Cargo.lock
+.DS_Store
