@@ -29,9 +29,7 @@ use frame_support::{
 	construct_runtime,
 	dispatch::DispatchClass,
 	parameter_types,
-	traits::{
-		ConstU32, Everything,
-	},
+	traits::{ConstU32, Everything},
 	weights::{
 		constants::WEIGHT_PER_SECOND, ConstantMultiplier, Weight, WeightToFeeCoefficient,
 		WeightToFeeCoefficients, WeightToFeePolynomial,
@@ -46,9 +44,9 @@ pub use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 pub use sp_runtime::{MultiAddress, Perbill, Permill};
 use xcm_config::{XcmConfig, XcmOriginToTransactDispatchOrigin};
 
+pub use pallet_directory::FileSystem;
 /// All custom pallets
 pub use pallet_samaritan;
-pub use pallet_directory::FileSystem;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -477,8 +475,8 @@ impl pallet_samaritan::Config for Runtime {
 	type MaxDIDLength = ConstU32<128>;
 	type MaxCacheLength = ConstU32<128>;
 	type MaxQuorumMembersCount = ConstU32<3>;
-	type MaxURILength = ConstU32<128>; 
-	type MaxStringLength = ConstU32<128>; 
+	type MaxURILength = ConstU32<128>;
+	type MaxStringLength = ConstU32<128>;
 }
 
 /// The Directory pallet manages the samaritan filesystem.

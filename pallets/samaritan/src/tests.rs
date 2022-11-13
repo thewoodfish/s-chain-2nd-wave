@@ -21,6 +21,8 @@ fn it_works_for_default_value() {
 #[test]
 fn create_samaritan_works() {
 
+	let samaritan: Samaritan = sam;
+
 	let name = name_too_long;
 	let did_str = did_too_long;
 	let did_str = string;
