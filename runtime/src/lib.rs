@@ -29,9 +29,7 @@ use frame_support::{
 	construct_runtime,
 	dispatch::DispatchClass,
 	parameter_types,
-	traits::{
-		ConstU32, Everything,
-	},
+	traits::{ConstU32, Everything},
 	weights::{
 		constants::WEIGHT_PER_SECOND, ConstantMultiplier, Weight, WeightToFeeCoefficient,
 		WeightToFeeCoefficients, WeightToFeePolynomial,
@@ -48,7 +46,6 @@ use xcm_config::{XcmConfig, XcmOriginToTransactDispatchOrigin};
 
 /// All custom pallets
 pub use pallet_samaritan;
-pub use pallet_directory::FileSystem;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -473,20 +470,11 @@ impl pallet_template::Config for Runtime {
 impl pallet_samaritan::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type TimeProvider = Timestamp;
-	type FileManager = Directory;
 	type MaxDIDLength = ConstU32<128>;
+	type MaxNameLength = ConstU32<128>;
 	type MaxCacheLength = ConstU32<128>;
 	type MaxQuorumMembersCount = ConstU32<3>;
-	type MaxURILength = ConstU32<128>; 
-	type MaxStringLength = ConstU32<128>; 
-}
-
-/// The Directory pallet manages the samaritan filesystem.
-impl pallet_directory::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type TimeProvider = Timestamp;
-	type MaxDIDLength = ConstU32<128>;
-	type MaxInodeCount = ConstU32<128>;
+	type MaxHashLength = ConstU32<9999999>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -526,7 +514,6 @@ construct_runtime!(
 
 		// Custom pallets
 		Samaritan: pallet_samaritan,
-		Directory: pallet_directory,
 	}
 );
 
