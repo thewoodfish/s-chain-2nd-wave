@@ -14,7 +14,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 
 	use scale_info::prelude::vec::Vec;
-	// use sp_core::H256;
+	use sp_core::H256;
 
 	use frame_support::traits::UnixTime;
 
@@ -72,8 +72,17 @@ pub mod pallet {
 	pub(super) type DocMetaRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<DocMetadata<T>, T::MaxCacheLength>>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn prof_reg)]
+	pub(super) type ProfileRegistry<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<u8, T::MaxHashLength>>;
+
+	#[pallet::storage]
 	#[pallet::getter(fn trust_quorum)]
 	pub(super) type TrustQuorum<T: Config> = StorageMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, BoundedVec<BoundedVec<u8, T::MaxDIDLength>, T::MaxQuorumMembersCount>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn signup_data)]
+	pub(super) type SignUpDataRegistry<T: Config> = StorageDoubleMap<_, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, Twox64Concat, BoundedVec<u8, T::MaxDIDLength>, H256, ValueQuery>;
+
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -88,6 +97,12 @@ pub mod pallet {
 		SamaritanScopeChanged { did: Vec<u8>, state: bool },
 		/// quorum updated
 		TrustQuorumUpdated { did: Vec<u8>, trust_did: Vec<u8> },
+		/// profile updated
+		ProfileUpdated { did: Vec<u8> },
+		/// app created
+		AppCreated { did: Vec<u8> },
+		/// get signup auth token
+		SignUpTokenGenerated { token: H256 } 
 	}
 
 	// Errors inform users that something went wrong.
@@ -361,6 +376,76 @@ pub mod pallet {
 
 			// emit event
 			Self::deposit_event(Event::TrustQuorumUpdated { did: did_str, trust_did });
+
+			Ok(())
+		}
+ 
+		#[pallet::weight(0)] 
+		/// update profile
+		pub fn update_profile(origin: OriginFor<T>, did_str: Vec<u8>, profile_hash: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let ph: BoundedVec<_, T::MaxHashLength> =
+				profile_hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			ProfileRegistry::<T>::insert(&did, ph);
+
+			// emit event
+			Self::deposit_event(Event::ProfileUpdated { did: did_str });
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// function to create a new app
+		pub fn create_app(origin: OriginFor<T>, did_str: Vec<u8>, meta_hash: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let did: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let hash: BoundedVec<_, T::MaxHashLength> = 
+				meta_hash.clone().try_into().map_err(|()| Error::<T>::HashLengthOverflow)?;
+
+			// register Document
+			let doc: DocMetadata<T> = DocMetadata {
+				version: 0,
+				hl: hash,
+				created: T::TimeProvider::now().as_secs(),
+				active: true
+			};
+
+			let mut cache: BoundedVec<DocMetadata<T>, T::MaxCacheLength> = Default::default();
+			cache.try_push(doc).map_err(|()| Error::<T>::CacheOverflow)?;
+
+			// insert into storage 
+			DocMetaRegistry::<T>::insert(&did, cache);
+
+			// emit event
+			Self::deposit_event(Event::AppCreated { did: did_str } );
+
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		/// create app login key
+		pub fn generate_token(origin: OriginFor<T>, app_did_str: Vec<u8>, did_str: Vec<u8>, token: H256) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let udid: BoundedVec<_, T::MaxDIDLength> = 
+				did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			let adid: BoundedVec<_, T::MaxDIDLength> = 
+				app_did_str.clone().try_into().map_err(|()| Error::<T>::DIDLengthOverflow)?;
+
+			// insert into storage 
+			SignUpDataRegistry::<T>::set(adid, udid, token.clone());
+
+			// emit event
+			Self::deposit_event(Event::SignUpTokenGenerated { token } );
 
 			Ok(())
 		}
